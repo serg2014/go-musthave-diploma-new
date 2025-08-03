@@ -9,4 +9,9 @@ type RegisterUser struct {
 	Password string `json:"password"`
 }
 
+type Balance struct {
+	Current   uint32 `json:"current"`
+	Withdrawn uint32 `json:"withdrawn"`
+}
+
 type UserID = uuid.UUID

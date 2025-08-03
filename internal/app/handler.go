@@ -24,6 +24,7 @@ func (a *App) setRoute() {
 		r.Post("/login", a.authUser())
 		r.Post("/orders", a.createOrder())
 		r.Get("/orders", a.GetOrders())
+		r.Get("/balance", a.Balance())
 	})
 }
 
@@ -154,6 +155,34 @@ func (a *App) GetOrders() http.HandlerFunc {
 		// а тело будет битым. возможно стоит сначала сериализовать. данных мало поэтому кажется ок
 		enc := json.NewEncoder(w)
 		if err := enc.Encode(orders); err != nil {
+			logger.Log.Error("error encoding response", zap.Error(err))
+			return
+		}
+	}
+}
+
+// TODO посмотреть может ли быть балланс дробным
+func (a *App) Balance() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, err := usercontext.GetUserID(r.Context())
+		if err != nil {
+			simpleError(w, http.StatusUnauthorized)
+			return
+		}
+		balance, err := a.store.Balance(r.Context(), *userID)
+		if err != nil {
+			logger.Log.Error("failed Balance", zap.Error(err))
+			simpleError(w, http.StatusInternalServerError)
+			return
+		}
+		// порядок важен
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// сериализуем ответ сервера
+		// TODO в случае ошибки сериализации клиенту уже отдали статус 200ок
+		// а тело будет битым. возможно стоит сначала сериализовать. данных мало поэтому кажется ок
+		enc := json.NewEncoder(w)
+		if err := enc.Encode(balance); err != nil {
 			logger.Log.Error("error encoding response", zap.Error(err))
 			return
 		}

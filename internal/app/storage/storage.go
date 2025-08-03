@@ -73,10 +73,17 @@ func NewStorage(ctx context.Context, dsn string) (Storager, error) {
 
 // TODO посмотреть какой тип в postgres serial
 func (s *storage) CreateUser(ctx context.Context, login, passwordHash string) (*models.UserID, error) {
+	// начать транзакцию
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("failed transaction in CreateUser: %w", err)
+	}
+	defer tx.Rollback()
+
 	query := `INSERT INTO users (login, hash) VALUES($1, $2) RETURNING user_id`
 	row := s.db.QueryRowContext(ctx, query, login, passwordHash)
 	var user User
-	err := row.Scan(&user.ID)
+	err = row.Scan(&user.ID)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) {
@@ -84,9 +91,19 @@ func (s *storage) CreateUser(ctx context.Context, login, passwordHash string) (*
 				return nil, ErrUserExists
 			}
 		}
-		return nil, fmt.Errorf("failed CreateUser. can not insert: %w", err)
+		return nil, fmt.Errorf("failed CreateUser. can not insert users: %w", err)
 	}
 
+	query = `INSERT INTO users_balance (user_id) VALUES($1)`
+	_, err = s.db.ExecContext(ctx, query, user.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed CreateUser. can not insert users_balance: %w", err)
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return nil, fmt.Errorf("failed commit transaction: %w", err)
+	}
 	return &user.ID, nil
 }
 
@@ -181,9 +198,25 @@ func (s *storage) GetUserOrders(ctx context.Context, userID models.UserID) (mode
 	return orders, nil
 }
 
+func (s *storage) Balance(ctx context.Context, userID models.UserID) (*models.Balance, error) {
+	query := `
+		SELECT accrual-withdraw, withdraw
+		FROM users_balance
+		WHERE user_id = $1
+	`
+	row := s.db.QueryRowContext(ctx, query, userID)
+	var balance models.Balance
+	err := row.Scan(&balance.Current, &balance.Withdrawn)
+	if err != nil {
+		return nil, fmt.Errorf("failed Balance: $w", err)
+	}
+	return &balance, nil
+}
+
 type Storager interface {
 	CreateUser(ctx context.Context, login, passwordHash string) (*models.UserID, error)
 	GetUser(ctx context.Context, login, passwordHash string) (*models.UserID, error)
 	CreateOrder(ctx context.Context, orderID string, userID models.UserID) error
 	GetUserOrders(ctx context.Context, userID models.UserID) (models.Orders, error)
+	Balance(ctx context.Context, userID models.UserID) (*models.Balance, error)
 }
