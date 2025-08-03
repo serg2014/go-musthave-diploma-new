@@ -1,0 +1,70 @@
+<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15" version="28.0.7">
+  <diagram name="Page-1" id="2AYsuJ4XQkpuzNHFwwOr">
+    <mxGraphModel dx="1018" dy="611" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="ZHIzqsZ1l1Q3CPzqQwwQ-1" value="Actor" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;" vertex="1" parent="1">
+          <mxGeometry x="60" y="80" width="30" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="ZHIzqsZ1l1Q3CPzqQwwQ-2" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="120" y="120" as="sourcePoint" />
+            <mxPoint x="420" y="120" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ZHIzqsZ1l1Q3CPzqQwwQ-3" value="&lt;div style=&quot;font-size: 16px; text-align: start; color: rgb(0, 0, 0); background-color: rgb(255, 255, 255); font-family: Menlo, Monaco, &amp;quot;Courier New&amp;quot;, monospace; line-height: 24px; white-space: pre;&quot;&gt;&lt;span style=&quot;color: rgb(128, 0, 0);&quot;&gt;POST /api/user/orders&lt;/span&gt;&lt;/div&gt;" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="140" y="50" width="220" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="ZHIzqsZ1l1Q3CPzqQwwQ-5" value="HTTP Server" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="440" y="90" width="120" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="ZHIzqsZ1l1Q3CPzqQwwQ-6" value="&lt;div style=&quot;text-align: justify;&quot;&gt;1. INSERT INTO orders&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;2. INSERT INTO orders_for_update&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;(order_id, user_id, update_time=NOW)&lt;/div&gt;" style="whiteSpace=wrap;html=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="30" y="180" width="240" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="ZHIzqsZ1l1Q3CPzqQwwQ-7" value="" style="endArrow=classic;html=1;rounded=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=0;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="ZHIzqsZ1l1Q3CPzqQwwQ-5" target="ZHIzqsZ1l1Q3CPzqQwwQ-6">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="280" y="200" as="sourcePoint" />
+            <mxPoint x="330" y="150" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ZHIzqsZ1l1Q3CPzqQwwQ-9" value="&lt;b style=&quot;caret-color: rgb(0, 0, 0); text-align: start; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;goroutine&lt;/b&gt;" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="460" y="190" width="120" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="ZHIzqsZ1l1Q3CPzqQwwQ-10" value="" style="endArrow=classic;html=1;rounded=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="ZHIzqsZ1l1Q3CPzqQwwQ-5" target="ZHIzqsZ1l1Q3CPzqQwwQ-9">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="400" y="290" as="sourcePoint" />
+            <mxPoint x="450" y="240" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ZHIzqsZ1l1Q3CPzqQwwQ-11" value="&lt;div style=&quot;text-align: justify;&quot;&gt;UPDATE orders_for_update&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;SET flag=SOME_VAL, locked_at=NOW&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;WHERE flag is NULL&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;ORDER BY update_time ACS&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;LIMIT 100&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;&lt;br&gt;&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;N горутин идут в сервис опрашивать статус заказа&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;Результаты складывают в родителя.&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;Родитель обновляет статус заказа&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;INSERT INTO orders (order_id, status) ...ON DUPLICATE KEYS UPDATE status&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;lделает вставку&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;INSERT INTO debet, если получили данные&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;группирует ответы по user_id, чтобы уменьшить вставки&lt;br&gt;&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;BEGIN TRANSACTION&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;INSERT INTO users_balance (user_id, accrual) ...ON DUPLICATE KEYS UPDATE accrual&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;по заказам у которых есть начисления&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;DELETE FROM orders_for_process WHERE order_id in(...)&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;для остальных&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;UPDATE orders_for_process SET locket_at=NULL, update_time=NOW, flag=NULL&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;WHERE flag=SOME_VAL&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;END&lt;/div&gt;" style="rounded=0;whiteSpace=wrap;html=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="50" y="290" width="530" height="310" as="geometry" />
+        </mxCell>
+        <mxCell id="ZHIzqsZ1l1Q3CPzqQwwQ-13" value="" style="endArrow=classic;html=1;rounded=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;" edge="1" parent="1" source="ZHIzqsZ1l1Q3CPzqQwwQ-9" target="ZHIzqsZ1l1Q3CPzqQwwQ-11">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="470" y="390" as="sourcePoint" />
+            <mxPoint x="520" y="340" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ZHIzqsZ1l1Q3CPzqQwwQ-14" value="&lt;b style=&quot;caret-color: rgb(0, 0, 0); text-align: start; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;goroutine&lt;/b&gt;" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="620" y="190" width="120" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="ZHIzqsZ1l1Q3CPzqQwwQ-15" value="" style="endArrow=classic;html=1;rounded=0;exitX=1.017;exitY=0.588;exitDx=0;exitDy=0;exitPerimeter=0;" edge="1" parent="1" source="ZHIzqsZ1l1Q3CPzqQwwQ-5" target="ZHIzqsZ1l1Q3CPzqQwwQ-14">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="470" y="390" as="sourcePoint" />
+            <mxPoint x="520" y="340" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ZHIzqsZ1l1Q3CPzqQwwQ-16" value="&lt;div style=&quot;text-align: justify;&quot;&gt;Если программа завершилась аварийно, надо почистить таблицу orders_for_process&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;UPDTAE orders_for_process&amp;nbsp;&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;SET flag=NULL, locked_at=NULL&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;WHERE locket_at&amp;lt;= NOW - 1*HOUR&lt;/div&gt;&lt;div style=&quot;text-align: justify;&quot;&gt;Горутина выполняется раз в час&lt;/div&gt;" style="rounded=0;whiteSpace=wrap;html=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="540" y="300" width="300" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="ZHIzqsZ1l1Q3CPzqQwwQ-17" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.433;entryY=0.033;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="ZHIzqsZ1l1Q3CPzqQwwQ-14" target="ZHIzqsZ1l1Q3CPzqQwwQ-16">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="630" y="360" as="sourcePoint" />
+            <mxPoint x="680" y="430" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
