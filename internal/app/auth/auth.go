@@ -12,6 +12,8 @@ import (
 	"github.com/google/uuid"
 	usercontext "github.com/serg2014/go-musthave-diploma/internal/app/context"
 	"github.com/serg2014/go-musthave-diploma/internal/app/models"
+	"github.com/serg2014/go-musthave-diploma/internal/logger"
+	"go.uber.org/zap"
 )
 
 var secretForPassword = []byte("somesecret")
@@ -74,19 +76,33 @@ func GetUserIDFromCookie(r *http.Request) (*models.UserID, error) {
 
 func AuthMiddleware(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		userID, err := GetUserIDFromCookie(r)
+		_, err := usercontext.GetUserID(r.Context())
 		if err != nil {
-			fmt.Printf("no user id from cookie: %v", err)
-		}
-		if err == nil {
-			// сохраним в контекст
-			ctx := usercontext.WithUser(r.Context(), userID)
-			// TODO может надо Clone
-			r2 := r.WithContext(ctx)
-			*r = *r2
+			code := http.StatusUnauthorized
+			http.Error(w, http.StatusText(code), code)
+			return
 		}
 
 		// передаём управление хендлеру
 		h.ServeHTTP(w, r)
+	})
+}
+
+func WithUserMiddleware(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userID, err := GetUserIDFromCookie(r)
+		if err != nil {
+			logger.Log.Debug("no user id from cookie", zap.Error(err))
+		}
+		// rew - request with user
+		rwu := r
+		if err == nil {
+			// сохраним в контекст
+			ctx := usercontext.WithUser(r.Context(), userID)
+			rwu = r.WithContext(ctx)
+		}
+
+		// передаём управление хендлеру
+		h.ServeHTTP(w, rwu)
 	})
 }

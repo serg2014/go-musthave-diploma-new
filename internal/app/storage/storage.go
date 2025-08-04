@@ -21,6 +21,8 @@ var ErrUserExists = errors.New("user exists")
 var ErrUserOrPassword = errors.New("bad user or password")
 var ErrOrderAnotherUser = errors.New("order another user")
 var ErrOrderExists = errors.New("order exists")
+var ErrNotEnoughMoney = errors.New("not enough money")
+var ErrOrderWithdrawnExists = errors.New("order withdrawn exists")
 
 type User struct {
 	ID    models.UserID
@@ -213,10 +215,49 @@ func (s *storage) Balance(ctx context.Context, userID models.UserID) (*models.Ba
 	return &balance, nil
 }
 
+func (s *storage) Withdraw(ctx context.Context, userID models.UserID, orderID string, sum uint32) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed transaction: $w", err)
+	}
+	defer tx.Rollback()
+
+	query := `
+		INSERT INTO credit (order_id, user_id, sum, create_time)
+		VALUES($1, $2, $3, current_timestamp)
+	`
+	_, err = s.db.ExecContext(ctx, query, orderID, userID, sum)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			if pgErr.Code == pgerrcode.UniqueViolation {
+				return ErrOrderWithdrawnExists
+			}
+		}
+		return fmt.Errorf("failed insert credit: $w", err)
+	}
+
+	query = `
+		UPDATE user_balance
+		SET withdrawn=withdrawn+$1, accural=accural-$1
+		WHERE user_id = $2 AND accural>=$1
+	`
+	result, err := s.db.ExecContext(ctx, query, sum, userID)
+	if err != nil {
+		return fmt.Errorf("failed update user_balance: $w", err)
+	}
+	ra, _ := result.RowsAffected()
+	if ra == 0 {
+		return ErrNotEnoughMoney
+	}
+	return tx.Commit()
+}
+
 type Storager interface {
 	CreateUser(ctx context.Context, login, passwordHash string) (*models.UserID, error)
 	GetUser(ctx context.Context, login, passwordHash string) (*models.UserID, error)
 	CreateOrder(ctx context.Context, orderID string, userID models.UserID) error
 	GetUserOrders(ctx context.Context, userID models.UserID) (models.Orders, error)
 	Balance(ctx context.Context, userID models.UserID) (*models.Balance, error)
+	Withdraw(ctx context.Context, userID models.UserID, orderID string, sum uint32) error
 }

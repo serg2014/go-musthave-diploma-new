@@ -15,3 +15,9 @@ type Balance struct {
 }
 
 type UserID = uuid.UUID
+type OrderID = string
+
+type WithdrawnRequest struct {
+	OrderID OrderID `json:"order"`
+	Sum     uint32  `json:"sum"`
+}

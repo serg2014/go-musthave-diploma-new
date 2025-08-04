@@ -17,14 +17,20 @@ import (
 
 func (a *App) setRoute() {
 	r := a.GetRouter()
+	r.Use(auth.WithUserMiddleware)
 	r.Use(logger.WithLogging)
-	r.Use(auth.AuthMiddleware)
-	r.Route("/api/user", func(r chi.Router) {
-		r.Post("/register", a.registerUser())
-		r.Post("/login", a.authUser())
-		r.Post("/orders", a.createOrder())
-		r.Get("/orders", a.GetOrders())
-		r.Get("/balance", a.Balance())
+	r.Post("/api/user/register", a.registerUser())
+	r.Post("/api/user/login", a.authUser())
+
+	r.Group(func(r chi.Router) {
+		r.Use(auth.AuthMiddleware)
+		//r.Use(middleware.Recoverer)
+
+		r.Route("/api/user", func(r chi.Router) {
+			r.Post("/orders", a.createOrder())
+			r.Get("/orders", a.GetOrders())
+			r.Get("/balance", a.Balance())
+		})
 	})
 }
 
@@ -187,4 +193,61 @@ func (a *App) Balance() http.HandlerFunc {
 			return
 		}
 	}
+}
+
+// TODO вынести авторизацию в middleware
+func (a *App) Withdraw() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, err := usercontext.GetUserID(r.Context())
+		if err != nil {
+			simpleError(w, http.StatusUnauthorized)
+			return
+		}
+
+		var req models.WithdrawnRequest
+		dec := json.NewDecoder(r.Body)
+		if err := dec.Decode(&req); err != nil {
+			logger.Log.Debug("cannot decode request JSON body", zap.Error(err))
+			http.Error(w, "bad json", http.StatusUnprocessableEntity)
+			return
+		}
+
+		err = checkLuhn(req.OrderID)
+		if err != nil {
+			simpleError(w, http.StatusUnprocessableEntity)
+			return
+		}
+
+		err = a.store.Withdraw(r.Context(), *userID, req.OrderID, req.Sum)
+		if err != nil {
+			code := http.StatusInternalServerError
+			if errors.Is(err, storage.ErrNotEnoughMoney) {
+				code = http.StatusPaymentRequired
+			} else if errors.Is(err, storage.ErrOrderWithdrawnExists) {
+				code = http.StatusUnprocessableEntity
+			}
+			simpleError(w, code)
+			return
+		}
+	}
+
+	// 	POST /api/user/balance/withdraw HTTP/1.1
+	// Content-Type: application/json
+
+	// {
+	// 	"order": "2377225624",
+	//     "sum": 751
+	// }
+	// ```
+
+	// Здесь `order` — номер заказа, а `sum` — сумма баллов к списанию в счёт оплаты.
+
+	// Возможные коды ответа:
+
+	// - `200` — успешная обработка запроса;
+	// - `401` — пользователь не авторизован;
+	// - `402` — на счету недостаточно средств;
+	// - `422` — неверный номер заказа;
+	// - `500` — внутренняя ошибка сервера.
+
 }
