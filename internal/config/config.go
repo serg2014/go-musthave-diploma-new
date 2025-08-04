@@ -13,7 +13,7 @@ import (
 type Config struct {
 	Address        string `env:"RUN_ADDRESS"`
 	DatabaseDSN    string `env:"DATABASE_URI"`
-	AccuralAddress string `env:"ACCRUAL_SYSTEM_ADDRESS"`
+	AccrualAddress string `env:"ACCRUAL_SYSTEM_ADDRESS"`
 	LogLevel       string
 }
 
@@ -22,7 +22,7 @@ func NewConfig() (*Config, error) {
 
 	flag.StringVar(&cfg.Address, "a", "", "server address")
 	flag.StringVar(&cfg.DatabaseDSN, "d", "", "database dsn")
-	flag.StringVar(&cfg.AccuralAddress, "r", "", "accural service address")
+	flag.StringVar(&cfg.AccrualAddress, "r", "", "accrual service address")
 	flag.StringVar(&cfg.LogLevel, "l", "info", "log level")
 	flag.Parse()
 

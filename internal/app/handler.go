@@ -30,6 +30,7 @@ func (a *App) setRoute() {
 			r.Post("/orders", a.createOrder())
 			r.Get("/orders", a.GetOrders())
 			r.Get("/balance", a.Balance())
+			r.Post("/balance/withdraw", a.Withdraw())
 		})
 	})
 }
@@ -220,11 +221,14 @@ func (a *App) Withdraw() http.HandlerFunc {
 
 		err = a.store.Withdraw(r.Context(), *userID, req.OrderID, req.Sum)
 		if err != nil {
-			code := http.StatusInternalServerError
+			var code int
 			if errors.Is(err, storage.ErrNotEnoughMoney) {
 				code = http.StatusPaymentRequired
 			} else if errors.Is(err, storage.ErrOrderWithdrawnExists) {
 				code = http.StatusUnprocessableEntity
+			} else {
+				logger.Log.Error("failed Withdraw", zap.Error(err))
+				code = http.StatusInternalServerError
 			}
 			simpleError(w, code)
 			return

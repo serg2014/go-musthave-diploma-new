@@ -76,14 +76,14 @@ func NewStorage(ctx context.Context, dsn string) (Storager, error) {
 // TODO посмотреть какой тип в postgres serial
 func (s *storage) CreateUser(ctx context.Context, login, passwordHash string) (*models.UserID, error) {
 	// начать транзакцию
-	tx, err := s.db.Begin()
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed transaction in CreateUser: %w", err)
 	}
 	defer tx.Rollback()
 
 	query := `INSERT INTO users (login, hash) VALUES($1, $2) RETURNING user_id`
-	row := s.db.QueryRowContext(ctx, query, login, passwordHash)
+	row := tx.QueryRowContext(ctx, query, login, passwordHash)
 	var user User
 	err = row.Scan(&user.ID)
 	if err != nil {
@@ -125,7 +125,7 @@ func (s *storage) GetUser(ctx context.Context, login, passwordHash string) (*mod
 
 func (s *storage) CreateOrder(ctx context.Context, orderID string, userID models.UserID) error {
 	// начать транзакцию
-	tx, err := s.db.Begin()
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed SetBatch: %w", err)
 	}
@@ -136,12 +136,12 @@ func (s *storage) CreateOrder(ctx context.Context, orderID string, userID models
 	INSERT INTO orders (order_id, user_id, upload_time, status)
 	VALUES($1, $2, current_timestamp, $3)
 	ON CONFLICT (order_id) DO NOTHING`
-	result, err := s.db.ExecContext(ctx, query, orderID, userID, models.OrderNew)
+	result, err := tx.ExecContext(ctx, query, orderID, userID, models.OrderNew)
 	if err != nil {
 		return fmt.Errorf("failed CreateOrder: %w", err)
 	}
 	ra, _ := result.RowsAffected()
-	logger.Log.Info("rowaffected", zap.Int64("ra", ra))
+	logger.Log.Info("rowsaffected", zap.Int64("ra", ra))
 	if ra == 0 {
 		// сразу отменяем транзакцию
 		tx.Rollback()
@@ -164,7 +164,7 @@ func (s *storage) CreateOrder(ctx context.Context, orderID string, userID models
 	query = `
 	INSERT INTO orders_for_process (order_id, user_id, update_time)
 	VALUES($1, $2, current_timestamp)`
-	_, err = s.db.ExecContext(ctx, query, orderID, userID)
+	_, err = tx.ExecContext(ctx, query, orderID, userID)
 	if err != nil {
 		return fmt.Errorf("failed CreateOrder: %w", err)
 	}
@@ -202,7 +202,7 @@ func (s *storage) GetUserOrders(ctx context.Context, userID models.UserID) (mode
 
 func (s *storage) Balance(ctx context.Context, userID models.UserID) (*models.Balance, error) {
 	query := `
-		SELECT accrual-withdraw, withdraw
+		SELECT accrual-withdrawn, withdrawn
 		FROM users_balance
 		WHERE user_id = $1
 	`
@@ -210,15 +210,15 @@ func (s *storage) Balance(ctx context.Context, userID models.UserID) (*models.Ba
 	var balance models.Balance
 	err := row.Scan(&balance.Current, &balance.Withdrawn)
 	if err != nil {
-		return nil, fmt.Errorf("failed Balance: $w", err)
+		return nil, fmt.Errorf("failed Balance: %w", err)
 	}
 	return &balance, nil
 }
 
 func (s *storage) Withdraw(ctx context.Context, userID models.UserID, orderID string, sum uint32) error {
-	tx, err := s.db.Begin()
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("failed transaction: $w", err)
+		return fmt.Errorf("failed begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -226,7 +226,7 @@ func (s *storage) Withdraw(ctx context.Context, userID models.UserID, orderID st
 		INSERT INTO credit (order_id, user_id, sum, create_time)
 		VALUES($1, $2, $3, current_timestamp)
 	`
-	_, err = s.db.ExecContext(ctx, query, orderID, userID, sum)
+	_, err = tx.ExecContext(ctx, query, orderID, userID, sum)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) {
@@ -234,17 +234,17 @@ func (s *storage) Withdraw(ctx context.Context, userID models.UserID, orderID st
 				return ErrOrderWithdrawnExists
 			}
 		}
-		return fmt.Errorf("failed insert credit: $w", err)
+		return fmt.Errorf("failed insert credit: %w", err)
 	}
 
 	query = `
-		UPDATE user_balance
-		SET withdrawn=withdrawn+$1, accural=accural-$1
-		WHERE user_id = $2 AND accural>=$1
+		UPDATE users_balance
+		SET withdrawn=withdrawn+$1, accrual=accrual-$1
+		WHERE user_id = $2 AND accrual>=$1
 	`
-	result, err := s.db.ExecContext(ctx, query, sum, userID)
+	result, err := tx.ExecContext(ctx, query, sum, userID)
 	if err != nil {
-		return fmt.Errorf("failed update user_balance: $w", err)
+		return fmt.Errorf("failed update user_balance: %w", err)
 	}
 	ra, _ := result.RowsAffected()
 	if ra == 0 {
