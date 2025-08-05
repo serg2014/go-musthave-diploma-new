@@ -11,8 +11,10 @@ const (
 	OrderProcessed  OrderStatus = "PROCESSED"
 )
 
+type OrderID = string
+
 type OrderItem struct {
-	OrderID    string      `json:"number"`
+	OrderID    OrderID     `json:"number"`
 	Status     OrderStatus `json:"status"`
 	Accrual    *uint64     `json:"accrual,omitempty"`
 	UploadTime time.Time   `json:"uploaded_at"`

@@ -15,9 +15,15 @@ type Balance struct {
 }
 
 type UserID = uuid.UUID
-type OrderID = string
 
 type WithdrawnRequest struct {
 	OrderID OrderID `json:"order"`
 	Sum     uint32  `json:"sum"`
 }
+
+type Withdrawal struct {
+	OrderID    OrderID `json:"order"`
+	Sum        uint32  `json:"sum"`
+	CreateTime string  `json:"processed_at"`
+}
+type Withdrawals []Withdrawal

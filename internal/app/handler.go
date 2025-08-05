@@ -31,6 +31,7 @@ func (a *App) setRoute() {
 			r.Get("/orders", a.GetOrders())
 			r.Get("/balance", a.Balance())
 			r.Post("/balance/withdraw", a.Withdraw())
+			r.Get("/withdrawals", a.Withdrawals())
 		})
 	})
 }
@@ -136,6 +137,7 @@ func (a *App) createOrder() http.HandlerFunc {
 	}
 }
 
+// TODO формат даты
 func (a *App) GetOrders() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, err := usercontext.GetUserID(r.Context())
@@ -234,24 +236,36 @@ func (a *App) Withdraw() http.HandlerFunc {
 			return
 		}
 	}
+}
 
-	// 	POST /api/user/balance/withdraw HTTP/1.1
-	// Content-Type: application/json
-
-	// {
-	// 	"order": "2377225624",
-	//     "sum": 751
-	// }
-	// ```
-
-	// Здесь `order` — номер заказа, а `sum` — сумма баллов к списанию в счёт оплаты.
-
-	// Возможные коды ответа:
-
-	// - `200` — успешная обработка запроса;
-	// - `401` — пользователь не авторизован;
-	// - `402` — на счету недостаточно средств;
-	// - `422` — неверный номер заказа;
-	// - `500` — внутренняя ошибка сервера.
-
+// TODO формат даты
+func (a *App) Withdrawals() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, err := usercontext.GetUserID(r.Context())
+		if err != nil {
+			simpleError(w, http.StatusUnauthorized)
+			return
+		}
+		data, err := a.store.Withdrawals(r.Context(), *userID)
+		if err != nil {
+			logger.Log.Error("failed Withdrawals", zap.Error(err))
+			simpleError(w, http.StatusInternalServerError)
+			return
+		}
+		if len(data) == 0 {
+			simpleError(w, http.StatusNoContent)
+			return
+		}
+		// порядок важен
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// сериализуем ответ сервера
+		// TODO в случае ошибки сериализации клиенту уже отдали статус 200ок
+		// а тело будет битым. возможно стоит сначала сериализовать. данных мало поэтому кажется ок
+		enc := json.NewEncoder(w)
+		if err := enc.Encode(data); err != nil {
+			logger.Log.Error("error encoding response", zap.Error(err))
+			return
+		}
+	}
 }

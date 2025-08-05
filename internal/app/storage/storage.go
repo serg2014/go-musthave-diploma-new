@@ -253,6 +253,34 @@ func (s *storage) Withdraw(ctx context.Context, userID models.UserID, orderID st
 	return tx.Commit()
 }
 
+func (s *storage) Withdrawals(ctx context.Context, userID models.UserID) (models.Withdrawals, error) {
+	query := `
+		SELECT order_id, sum, create_time
+		FROM credit
+		WHERE user_id = $1
+	`
+	rows, err := s.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed Withdrawals: %w", err)
+	}
+	defer rows.Close()
+
+	withdrawals := make(models.Withdrawals, 0)
+	for rows.Next() {
+		var withdrawal models.Withdrawal
+		err := rows.Scan(&withdrawal.OrderID, &withdrawal.Sum, &withdrawal.CreateTime)
+		if err != nil {
+			return nil, fmt.Errorf("failed Scan in Withdrawals: %w", err)
+		}
+		withdrawals = append(withdrawals, withdrawal)
+	}
+	err = rows.Err()
+	if err != nil {
+		return nil, fmt.Errorf("failed Withdrawals: %w", err)
+	}
+	return withdrawals, nil
+}
+
 type Storager interface {
 	CreateUser(ctx context.Context, login, passwordHash string) (*models.UserID, error)
 	GetUser(ctx context.Context, login, passwordHash string) (*models.UserID, error)
@@ -260,4 +288,5 @@ type Storager interface {
 	GetUserOrders(ctx context.Context, userID models.UserID) (models.Orders, error)
 	Balance(ctx context.Context, userID models.UserID) (*models.Balance, error)
 	Withdraw(ctx context.Context, userID models.UserID, orderID string, sum uint32) error
+	Withdrawals(ctx context.Context, userID models.UserID) (models.Withdrawals, error)
 }
