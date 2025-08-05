@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/serg2014/go-musthave-diploma/internal/app/storage"
@@ -63,19 +64,7 @@ func checkLuhn(code string) error {
 	return nil
 }
 
-/*
- function checkLuhn(string purportedCC) {
-     int sum := 0
-     int nDigits := length(purportedCC)
-     int parity := nDigits modulus 2
-     for i from 0 to nDigits - 1 {
-         int digit := integer(purportedCC[i])
-         if i modulus 2 = parity
-             digit := digit × 2
-             if digit > 9
-                 digit := digit - 9
-         sum := sum + digit
-     }
-     return (sum modulus 10) = 0
- }
-*/
+func (a *App) CleanupAfterCrash(ctx context.Context, t time.Duration) error {
+	err := a.store.CleanupAfterCrash(ctx, t)
+	return err
+}

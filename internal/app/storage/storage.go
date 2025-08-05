@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/golang-migrate/migrate"
 	"github.com/golang-migrate/migrate/database/postgres"
@@ -281,6 +282,19 @@ func (s *storage) Withdrawals(ctx context.Context, userID models.UserID) (models
 	return withdrawals, nil
 }
 
+func (s *storage) CleanupAfterCrash(ctx context.Context, t time.Duration) error {
+	query := `
+		UPDATE orders_for_process
+		SET who_lock=NULL, locket_at=NULL
+		WHERE locket_at <= NOW() - make_interval(hours => $1)
+	`
+	_, err := s.db.ExecContext(ctx, query, t.Hours())
+	if err != nil {
+		return fmt.Errorf("failed cleanup: %w", err)
+	}
+	return nil
+}
+
 type Storager interface {
 	CreateUser(ctx context.Context, login, passwordHash string) (*models.UserID, error)
 	GetUser(ctx context.Context, login, passwordHash string) (*models.UserID, error)
@@ -289,4 +303,5 @@ type Storager interface {
 	Balance(ctx context.Context, userID models.UserID) (*models.Balance, error)
 	Withdraw(ctx context.Context, userID models.UserID, orderID string, sum uint32) error
 	Withdrawals(ctx context.Context, userID models.UserID) (models.Withdrawals, error)
+	CleanupAfterCrash(ctx context.Context, t time.Duration) error
 }

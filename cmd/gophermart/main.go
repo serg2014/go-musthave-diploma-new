@@ -30,25 +30,55 @@ func main() {
 		logger.Log.Fatal("error NewApp", zap.Error(err))
 	}
 
-	run_server(a.Address(), a.GetRouter())
+	run_server(a.Address(), a.GetRouter(), a.CleanupAfterCrash)
 }
 
-func run_server(address string, h http.Handler) {
+func run_server(address string, h http.Handler, f func(ctx context.Context, t time.Duration) error) {
 	srv := http.Server{
 		Addr:    address,
 		Handler: h,
 	}
 
 	var wg sync.WaitGroup
+	stopChannel := make(chan struct{})
+
 	wg.Add(1)
 	go func() {
+		defer wg.Done()
+		// TODO const or conf
+		period := 2 * time.Hour
+		ticker := time.NewTicker(period)
+		for {
+			err := f(context.Background(), period)
+			if err != nil {
+				logger.Log.Error("failed cleanup", zap.Error(err))
+			} else {
+				logger.Log.Debug("cleanup done")
+			}
+			select {
+			case <-ticker.C:
+			case <-stopChannel:
+				logger.Log.Info("Stop cleanup goroutine")
+				return
+			}
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 		// создаем контекст, который будет отменен при получении сигнала
-		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		ctxS, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
+		select {
 		// 	ждем сигнала от ОС
-		<-ctx.Done()
-		logger.Log.Info("catch signal")
+		case <-ctxS.Done():
+			logger.Log.Info("catch signal")
+		// ждем закрытия канала
+		case <-stopChannel:
+			logger.Log.Info("stop")
+		}
 
 		// даем 5 секунд на завершение
 		// TODO время в конфиг
@@ -57,7 +87,6 @@ func run_server(address string, h http.Handler) {
 		if err := srv.Shutdown(ctxT); err != nil {
 			logger.Log.Info("Server forced to shutdown", zap.Error(err))
 		}
-		wg.Done()
 	}()
 
 	logger.Log.Info(fmt.Sprintf("Start server on %s", address))
@@ -65,6 +94,8 @@ func run_server(address string, h http.Handler) {
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Log.Panic("error in ListenAndServe", zap.Error(err))
 	}
+
+	close(stopChannel)
 	wg.Wait()
 	logger.Log.Info("Server is shutdown")
 
