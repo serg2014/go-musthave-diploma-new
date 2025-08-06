@@ -8,14 +8,21 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/serg2014/go-musthave-diploma/internal/app/models"
 	"github.com/serg2014/go-musthave-diploma/internal/app/storage"
 	"github.com/serg2014/go-musthave-diploma/internal/config"
+	"github.com/serg2014/go-musthave-diploma/internal/logger"
+	"go.uber.org/zap"
 )
 
+const ChanLimit = 100
+
 type App struct {
-	config *config.Config
-	router *chi.Mux
-	store  storage.Storager
+	config  *config.Config
+	router  *chi.Mux
+	store   storage.Storager
+	reqChan chan *models.ProcessingOrderItem
+	resChan chan *models.AccrualOrderItem
 }
 
 func NewApp(cnf *config.Config) (*App, error) {
@@ -27,6 +34,9 @@ func NewApp(cnf *config.Config) (*App, error) {
 		config: cnf,
 		router: chi.NewRouter(),
 		store:  s,
+		// TODO должен быть согласован с лимитом в update
+		reqChan: make(chan *models.ProcessingOrderItem, ChanLimit),
+		resChan: make(chan *models.AccrualOrderItem, ChanLimit),
 	}
 	app.setRoute()
 	return app, nil
@@ -67,4 +77,54 @@ func checkLuhn(code string) error {
 func (a *App) CleanupAfterCrash(ctx context.Context, t time.Duration) error {
 	err := a.store.CleanupAfterCrash(ctx, t)
 	return err
+}
+
+func (a *App) ProcessOrders(ctx context.Context) {
+	// запустить N воркеров читающих из a.reqChan и пишущих в a.resChan
+
+	ticker := time.NewTicker(10 * time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			data, err := a.store.GetOrdersForProcess(ctx, ChanLimit)
+			if err != nil {
+				logger.Log.Error("failed GetOrdersForProcess", zap.Error(err))
+				break
+			}
+			if len(data) != 0 {
+				for i := range data {
+					// send orderid and userid
+					a.reqChan <- &data[i]
+				}
+
+				// заказы по которым получили терминальный статус
+				//finish := make([]*models.AccrualOrderItem, 0, len(data))
+				// заказы по которым не получили терминальный статус
+				//processing := make([]*models.AccrualOrderItem, 0, len(data))
+				accrual := make([]*models.AccrualOrderItem, len(data))
+				for i := range accrual {
+					select {
+					case <-ctx.Done():
+						return
+					case itemPtr := <-a.resChan:
+						/*
+							if slices.Contains(models.AccrualOrderTerminateStatus, itemPtr.Status) {
+								finish = append(finish, itemPtr)
+							} else {
+								processing = append(processing, itemPtr)
+							}
+						*/
+						accrual[i] = itemPtr
+					}
+				}
+				err := a.store.UpdateOrders(ctx, accrual)
+				if err != nil {
+					logger.Log.Error("failed UpdateOrders", zap.Error(err))
+					return
+				}
+			}
+		}
+	}
 }

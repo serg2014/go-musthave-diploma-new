@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/golang-migrate/migrate"
@@ -98,7 +99,7 @@ func (s *storage) CreateUser(ctx context.Context, login, passwordHash string) (*
 	}
 
 	query = `INSERT INTO users_balance (user_id) VALUES($1)`
-	_, err = s.db.ExecContext(ctx, query, user.ID)
+	_, err = tx.ExecContext(ctx, query, user.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed CreateUser. can not insert users_balance: %w", err)
 	}
@@ -295,6 +296,90 @@ func (s *storage) CleanupAfterCrash(ctx context.Context, t time.Duration) error 
 	return nil
 }
 
+func (s *storage) GetOrdersForProcess(ctx context.Context, limit uint) (models.ProcessingOrders, error) {
+	// TODO
+	/*
+		WITH o4p AS (
+		  SELECT o.ctid FROM orders_for_process AS o
+		    WHERE o.who_lock IS NULL
+		    ORDER BY o.update_time
+		    FOR UPDATE
+		    LIMIT 1
+		)
+		update orders_for_process set who_lock='one'
+		from o4p
+		where orders_for_process.ctid = o4p.ctid
+		returning order_id, user_id, gen_random_uuid() as who_lock
+	*/
+	return nil, errors.New("some error")
+}
+
+func (s *storage) UpdateOrders(ctx context.Context, data []*models.AccrualOrderItem) error {
+	// начать транзакцию
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed transaction in UpdateOrders: %w", err)
+	}
+	defer tx.Rollback()
+
+	query := `
+		INSERT INTO orders (order_id, status, accrual)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (order_id)
+		DO UPDATE SET
+		status = EXCLUDED.status
+		accrual = EXCLUDED.accrual
+	`
+	stmt, err := tx.PrepareContext(ctx, query)
+	if err != nil {
+		return fmt.Errorf("failed prepare orders: %w", err)
+	}
+	defer stmt.Close()
+	for _, ptr := range data {
+		_, err := stmt.ExecContext(ctx, ptr.OrderID, ptr.Status, ptr.Accrual)
+		if err != nil {
+			return fmt.Errorf("failed exec orders: %w", err)
+		}
+	}
+
+	queryDebet := `
+		INSERT INTO debet (order_id, user_id, sum, create_time)
+		VALUES ($1, $2, $3, current_timestamp)
+	`
+	stmtDebet, err := tx.PrepareContext(ctx, queryDebet)
+	if err != nil {
+		return fmt.Errorf("failed prepare debet: %w", err)
+	}
+	defer stmtDebet.Close()
+
+	queryDelete := "DELETE FROM order_for_process WHERE order_id = $1"
+	stmtDelete, err := tx.PrepareContext(ctx, queryDelete)
+	if err != nil {
+		return fmt.Errorf("failed prepare delete: %w", err)
+	}
+	defer stmtDelete.Close()
+
+	for _, ptr := range data {
+		if slices.Contains(models.AccrualOrderTerminateStatus, ptr.Status) {
+			_, err := stmtDebet.ExecContext(ctx, ptr.OrderID, ptr.UserID, ptr.Accrual)
+			if err != nil {
+				return fmt.Errorf("failed exec debet: %w", err)
+			}
+			_, err = stmtDelete.ExecContext(ctx, ptr.OrderID)
+			if err != nil {
+				return fmt.Errorf("failed exec delete: %w", err)
+			}
+		}
+	}
+
+	query = `
+	UPDATE order_for_process
+	SET who_lock=NULL, locked_at=NULL, update_time=current_timestamp
+	WHERE who_lock = $1`
+
+	return tx.Commit()
+}
+
 type Storager interface {
 	CreateUser(ctx context.Context, login, passwordHash string) (*models.UserID, error)
 	GetUser(ctx context.Context, login, passwordHash string) (*models.UserID, error)
@@ -304,4 +389,6 @@ type Storager interface {
 	Withdraw(ctx context.Context, userID models.UserID, orderID string, sum uint32) error
 	Withdrawals(ctx context.Context, userID models.UserID) (models.Withdrawals, error)
 	CleanupAfterCrash(ctx context.Context, t time.Duration) error
+	GetOrdersForProcess(ctx context.Context, limit uint) (models.ProcessingOrders, error)
+	UpdateOrders(ctx context.Context, data []*models.AccrualOrderItem) error
 }
