@@ -15,6 +15,7 @@ type Config struct {
 	DatabaseDSN    string `env:"DATABASE_URI"`
 	AccrualAddress string `env:"ACCRUAL_SYSTEM_ADDRESS"`
 	LogLevel       string
+	Port           uint16
 }
 
 func NewConfig() (*Config, error) {
@@ -38,10 +39,11 @@ func NewConfig() (*Config, error) {
 		return nil, fmt.Errorf("bad format, use host:port: %w", err)
 	}
 
-	_, err = strconv.ParseUint(port, 10, 32)
+	portInt, err := strconv.ParseUint(port, 10, 16)
 	if err != nil {
 		return nil, fmt.Errorf("port required only digest: %w", err)
 	}
+	cfg.Port = uint16(portInt)
 
 	if cfg.DatabaseDSN == "" {
 		return nil, errors.New("dsn is required")

@@ -17,8 +17,8 @@ CREATE TABLE IF NOT EXISTS orders_for_process (
     order_id text NOT NULL PRIMARY KEY,
     user_id uuid NOT NULL,
     who_lock char(20),
-    locket_at timestamp,
+    locked_at timestamp,
     update_time timestamp NOT NULL
 );
 CREATE INDEX orders_for_process_who_lock_update_time_idx ON orders_for_process (who_lock, update_time);
-CREATE INDEX orders_for_process_locket_at_idx ON orders_for_process (locket_at);
+CREATE INDEX orders_for_process_locked_at_idx ON orders_for_process (locked_at);

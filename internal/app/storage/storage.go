@@ -186,7 +186,7 @@ func (s *storage) GetUserOrders(ctx context.Context, userID models.UserID) (mode
 	}
 	defer rows.Close()
 
-	orders := make(models.Orders, 0)
+	orders := make(models.Orders, 0, 10)
 	for rows.Next() {
 		var order models.OrderItem
 		err := rows.Scan(&order.OrderID, &order.UploadTime, &order.Status, &order.Accrual)
@@ -195,8 +195,8 @@ func (s *storage) GetUserOrders(ctx context.Context, userID models.UserID) (mode
 		}
 		orders = append(orders, order)
 	}
-	err = rows.Err()
-	if err != nil {
+
+	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("faild row: %w", err)
 	}
 	return orders, nil
@@ -267,7 +267,7 @@ func (s *storage) Withdrawals(ctx context.Context, userID models.UserID) (models
 	}
 	defer rows.Close()
 
-	withdrawals := make(models.Withdrawals, 0)
+	withdrawals := make(models.Withdrawals, 0, 10)
 	for rows.Next() {
 		var withdrawal models.Withdrawal
 		err := rows.Scan(&withdrawal.OrderID, &withdrawal.Sum, &withdrawal.CreateTime)
@@ -276,8 +276,8 @@ func (s *storage) Withdrawals(ctx context.Context, userID models.UserID) (models
 		}
 		withdrawals = append(withdrawals, withdrawal)
 	}
-	err = rows.Err()
-	if err != nil {
+
+	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("failed Withdrawals: %w", err)
 	}
 	return withdrawals, nil
@@ -286,8 +286,8 @@ func (s *storage) Withdrawals(ctx context.Context, userID models.UserID) (models
 func (s *storage) CleanupAfterCrash(ctx context.Context, t time.Duration) error {
 	query := `
 		UPDATE orders_for_process
-		SET who_lock=NULL, locket_at=NULL
-		WHERE locket_at <= NOW() - make_interval(hours => $1)
+		SET who_lock=NULL, locked_at=NULL
+		WHERE locked_at <= NOW() - make_interval(hours => $1)
 	`
 	_, err := s.db.ExecContext(ctx, query, t.Hours())
 	if err != nil {
@@ -296,25 +296,45 @@ func (s *storage) CleanupAfterCrash(ctx context.Context, t time.Duration) error 
 	return nil
 }
 
-func (s *storage) GetOrdersForProcess(ctx context.Context, limit uint) (models.ProcessingOrders, error) {
-	// TODO
-	/*
+func (s *storage) GetOrdersForProcess(ctx context.Context, who string, limit uint) (models.ProcessingOrders, error) {
+	query := `
 		WITH o4p AS (
 		  SELECT o.ctid FROM orders_for_process AS o
 		    WHERE o.who_lock IS NULL
 		    ORDER BY o.update_time
 		    FOR UPDATE
-		    LIMIT 1
+		    LIMIT $1
 		)
-		update orders_for_process set who_lock='one'
-		from o4p
-		where orders_for_process.ctid = o4p.ctid
-		returning order_id, user_id, gen_random_uuid() as who_lock
-	*/
-	return nil, errors.New("some error")
+		UPDATE orders_for_process
+		SET who_lock=$2, locked_at=current_timestamp
+		FROM o4p
+		WHERE orders_for_process.ctid = o4p.ctid
+		RETURNING order_id, user_id
+	`
+	// TODO use limit
+	rows, err := s.db.QueryContext(ctx, query, 1, who)
+	if err != nil {
+		return nil, fmt.Errorf("failed mark order_for_update: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(models.ProcessingOrders, 0, limit)
+	for rows.Next() {
+		var item models.ProcessingOrderItem
+		err := rows.Scan(&item.OrderID, &item.UserID)
+		if err != nil {
+			return nil, fmt.Errorf("failed scan order_for_update: %w", err)
+		}
+		result = append(result, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed next order_for_update: %w", err)
+	}
+
+	return result, nil
 }
 
-func (s *storage) UpdateOrders(ctx context.Context, data []*models.AccrualOrderItem) error {
+func (s *storage) UpdateOrders(ctx context.Context, data []*models.AccrualOrderItem, who string) error {
 	// начать транзакцию
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -376,6 +396,10 @@ func (s *storage) UpdateOrders(ctx context.Context, data []*models.AccrualOrderI
 	UPDATE order_for_process
 	SET who_lock=NULL, locked_at=NULL, update_time=current_timestamp
 	WHERE who_lock = $1`
+	_, err = tx.ExecContext(ctx, query, who)
+	if err != nil {
+		return fmt.Errorf("failed reset who_lock: %w", err)
+	}
 
 	return tx.Commit()
 }
@@ -389,6 +413,6 @@ type Storager interface {
 	Withdraw(ctx context.Context, userID models.UserID, orderID string, sum uint32) error
 	Withdrawals(ctx context.Context, userID models.UserID) (models.Withdrawals, error)
 	CleanupAfterCrash(ctx context.Context, t time.Duration) error
-	GetOrdersForProcess(ctx context.Context, limit uint) (models.ProcessingOrders, error)
-	UpdateOrders(ctx context.Context, data []*models.AccrualOrderItem) error
+	GetOrdersForProcess(ctx context.Context, who string, limit uint) (models.ProcessingOrders, error)
+	UpdateOrders(ctx context.Context, data []*models.AccrualOrderItem, who string) error
 }
