@@ -19,6 +19,7 @@ func (a *App) setRoute() {
 	r := a.GetRouter()
 	r.Use(auth.WithUserMiddleware)
 	r.Use(logger.WithLogging)
+	r.Use(gzipMiddleware)
 	r.Post("/api/user/register", a.registerUser())
 	r.Post("/api/user/login", a.authUser())
 
