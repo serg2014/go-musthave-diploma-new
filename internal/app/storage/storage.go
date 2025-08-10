@@ -75,7 +75,6 @@ func NewStorage(ctx context.Context, dsn string) (Storager, error) {
 	return &storage{db: db}, nil
 }
 
-// TODO посмотреть какой тип в postgres serial
 func (s *storage) CreateUser(ctx context.Context, login, passwordHash string) (*models.UserID, error) {
 	// начать транзакцию
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -96,12 +95,6 @@ func (s *storage) CreateUser(ctx context.Context, login, passwordHash string) (*
 			}
 		}
 		return nil, fmt.Errorf("failed CreateUser. can not insert users: %w", err)
-	}
-
-	query = `INSERT INTO users_balance (user_id) VALUES($1)`
-	_, err = tx.ExecContext(ctx, query, user.ID)
-	if err != nil {
-		return nil, fmt.Errorf("failed CreateUser. can not insert users_balance: %w", err)
 	}
 
 	err = tx.Commit()
@@ -143,7 +136,6 @@ func (s *storage) CreateOrder(ctx context.Context, orderID string, userID models
 		return fmt.Errorf("failed CreateOrder: %w", err)
 	}
 	ra, _ := result.RowsAffected()
-	logger.Log.Info("rowsaffected", zap.Int64("ra", ra))
 	if ra == 0 {
 		// сразу отменяем транзакцию
 		tx.Rollback()
@@ -205,14 +197,19 @@ func (s *storage) GetUserOrders(ctx context.Context, userID models.UserID) (mode
 
 func (s *storage) Balance(ctx context.Context, userID models.UserID) (*models.Balance, error) {
 	query := `
-		SELECT accrual-withdrawn, withdrawn
-		FROM users_balance
-		WHERE user_id = $1
+		SELECT accrual-withdrawn as current, withdrawn
+		FROM (
+			SELECT sum(case when "type" = 'CREDIT' then "sum" else 0 end) as withdrawn,
+ 			       sum(case when "type" = 'DEBET' then "sum" else 0 end) as accrual
+			FROM debet_credit
+			WHERE user_id = $1
+			GROUP BY user_id
+		)
 	`
 	row := s.db.QueryRowContext(ctx, query, userID)
 	var balance models.Balance
 	err := row.Scan(&balance.Current, &balance.Withdrawn)
-	if err != nil {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("failed Balance: %w", err)
 	}
 	return &balance, nil
@@ -226,6 +223,51 @@ func (s *storage) Withdraw(ctx context.Context, userID models.UserID, orderID st
 	defer tx.Rollback()
 
 	query := `
+		SELECT accrual, withdrawn 
+		FROM debet_credit
+		WHERE user_id = $1
+		FOR UPDATE
+	`
+	_, err = tx.ExecContext(ctx, query, userID)
+	if err != nil {
+		return fmt.Errorf("failed for update: %w", err)
+	}
+	// query = `
+	// 	UPDATE users_balance
+	// 	SET withdrawn=withdrawn+$1, accrual=accrual-$1
+	// 	WHERE user_id = $1 AND accrual>=$2
+	// `
+	// result, err := tx.ExecContext(ctx, query, userID, sum)
+	// if err != nil {
+	// 	return fmt.Errorf("failed update user_balance: %w", err)
+	// }
+	// ra, _ := result.RowsAffected()
+	// if ra == 0 {
+	// 	return ErrNotEnoughMoney
+	// }
+	query = `
+		SELECT user_id
+		FROM (
+			SELECT sum(case when "type" = 'CREDIT' then "sum" else 0 end) as withdrawn,
+ 				   sum(case when "type" = 'DEBET' then "sum" else 0 end) as accrual,
+ 				   user_id
+			FROM debet_credit
+			WHERE user_id = $1
+			GROUP BY user_id
+		)
+		WHERE accrual >= withdrawn + $2
+	`
+	row := tx.QueryRowContext(ctx, query, userID, sum)
+	var user models.UserID
+	err = row.Scan(&user)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return ErrNotEnoughMoney
+		}
+		return fmt.Errorf("failed balance from debet_credit: %w", err)
+	}
+
+	query = `
 		INSERT INTO debet_credit (order_id, type, user_id, sum)
 		VALUES($1, $2, $3, $4)
 	`
@@ -240,19 +282,6 @@ func (s *storage) Withdraw(ctx context.Context, userID models.UserID, orderID st
 		return fmt.Errorf("failed insert debet_credit: %w", err)
 	}
 
-	query = `
-		UPDATE users_balance
-		SET withdrawn=withdrawn+$1, accrual=accrual-$1
-		WHERE user_id = $2 AND accrual>=$1
-	`
-	result, err := tx.ExecContext(ctx, query, sum, userID)
-	if err != nil {
-		return fmt.Errorf("failed update user_balance: %w", err)
-	}
-	ra, _ := result.RowsAffected()
-	if ra == 0 {
-		return ErrNotEnoughMoney
-	}
 	return tx.Commit()
 }
 
@@ -357,6 +386,7 @@ func (s *storage) UpdateOrders(ctx context.Context, data []*models.AccrualOrderI
 		return fmt.Errorf("failed prepare orders: %w", err)
 	}
 	defer stmt.Close()
+
 	for _, ptr := range data {
 		_, err := stmt.ExecContext(ctx, ptr.OrderID, ptr.Status, ptr.Accrual, ptr.UserID)
 		if err != nil {

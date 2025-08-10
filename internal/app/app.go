@@ -96,30 +96,8 @@ func (a *App) CleanupAfterCrash(ctx context.Context, t time.Duration) error {
 	return err
 }
 
-func (a *App) worker(ctx context.Context, i int) {
-	for {
-		select {
-		case data := <-a.reqChan:
-			resp := a.getAccrual(data)
-			a.resChan <- resp
-		case <-ctx.Done():
-			logger.Log.Debug("Stop worker", zap.Int("num", i))
-			return
-		}
-	}
-}
-
-func (a *App) getAccrual(item *models.ProcessingOrderItem) *models.AccrualOrderItem {
-	// TODO
-	return &models.AccrualOrderItem{
-		OrderID: item.OrderID,
-		Error:   errors.New("some error"),
-	}
-}
-
 func (a *App) ProcessOrders(ctx context.Context) {
 	// TODO количество воркеров в конфиг
-	// запустить N воркеров читающих из a.reqChan и пишущих в a.resChan
 	for i := range 10 {
 		go a.worker(ctx, i)
 	}
@@ -133,7 +111,6 @@ func (a *App) ProcessOrders(ctx context.Context) {
 	defer cleanup()
 
 	ticker := time.NewTicker(10 * time.Second)
-	// TODO сбросить метки
 	for {
 		select {
 		case <-ctx.Done():
