@@ -11,7 +11,7 @@ import (
 func gzipMiddleware(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		acceptEncodinng := strings.Split(r.Header.Get("Accept-Encoding"), ",")
-		gzipOut := slices.Index(acceptEncodinng, "gzip") == -1
+		gzipOut := slices.Index(acceptEncodinng, "gzip") != -1
 		if gzipOut {
 			// оборачиваем writer
 			cw := newCompressWriter(w)
@@ -20,7 +20,7 @@ func gzipMiddleware(h http.Handler) http.Handler {
 		}
 
 		contentEncoding := strings.Split(r.Header.Get("Content-Encoding"), ", ")
-		gzipIn := slices.Index(contentEncoding, "gzip") == -1
+		gzipIn := slices.Index(contentEncoding, "gzip") != -1
 		if gzipIn {
 			// оборачиваем тело запроса в io.Reader с поддержкой декомпрессии
 			cr, err := newCompressReader(r.Body)
@@ -58,6 +58,9 @@ func (w *compressWriter) Write(buf []byte) (int, error) {
 }
 
 func (w *compressWriter) WriteHeader(statusCode int) {
+	if statusCode < 300 && statusCode >= 200 {
+		w.w.Header().Set("Content-Encoding", "gzip")
+	}
 	w.w.WriteHeader(statusCode)
 }
 

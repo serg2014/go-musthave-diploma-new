@@ -7,7 +7,7 @@ END $$;
 CREATE TABLE IF NOT EXISTS orders (
     order_id text NOT NULL PRIMARY KEY,
     user_id uuid NOT NULL,
-    upload_time timestamp NOT NULL,
+    upload_time timestamp NOT NULL DEFAULT current_timestamp,
     status  order_status NOT NULL,
     accrual int
 );

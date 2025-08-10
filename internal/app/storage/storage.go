@@ -189,6 +189,7 @@ func (s *storage) GetUserOrders(ctx context.Context, userID models.UserID) (mode
 	orders := make(models.Orders, 0, 10)
 	for rows.Next() {
 		var order models.OrderItem
+		// TODO время в формате RFC3339
 		err := rows.Scan(&order.OrderID, &order.UploadTime, &order.Status, &order.Accrual)
 		if err != nil {
 			return nil, fmt.Errorf("failed Scan in GetUserOrders: %w", err)
@@ -225,10 +226,10 @@ func (s *storage) Withdraw(ctx context.Context, userID models.UserID, orderID st
 	defer tx.Rollback()
 
 	query := `
-		INSERT INTO credit (order_id, user_id, sum, create_time)
-		VALUES($1, $2, $3, current_timestamp)
+		INSERT INTO debet_credit (order_id, type, user_id, sum)
+		VALUES($1, $2, $3, $4)
 	`
-	_, err = tx.ExecContext(ctx, query, orderID, userID, sum)
+	_, err = tx.ExecContext(ctx, query, orderID, models.Credit, userID, sum)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) {
@@ -236,7 +237,7 @@ func (s *storage) Withdraw(ctx context.Context, userID models.UserID, orderID st
 				return ErrOrderWithdrawnExists
 			}
 		}
-		return fmt.Errorf("failed insert credit: %w", err)
+		return fmt.Errorf("failed insert debet_credit: %w", err)
 	}
 
 	query = `
@@ -258,10 +259,10 @@ func (s *storage) Withdraw(ctx context.Context, userID models.UserID, orderID st
 func (s *storage) Withdrawals(ctx context.Context, userID models.UserID) (models.Withdrawals, error) {
 	query := `
 		SELECT order_id, sum, create_time
-		FROM credit
-		WHERE user_id = $1
+		FROM debet_credit
+		WHERE user_id = $1 AND type = $2
 	`
-	rows, err := s.db.QueryContext(ctx, query, userID)
+	rows, err := s.db.QueryContext(ctx, query, userID, models.Credit)
 	if err != nil {
 		return nil, fmt.Errorf("failed Withdrawals: %w", err)
 	}
@@ -270,6 +271,7 @@ func (s *storage) Withdrawals(ctx context.Context, userID models.UserID) (models
 	withdrawals := make(models.Withdrawals, 0, 10)
 	for rows.Next() {
 		var withdrawal models.Withdrawal
+		// TODO время в формате RFC3339
 		err := rows.Scan(&withdrawal.OrderID, &withdrawal.Sum, &withdrawal.CreateTime)
 		if err != nil {
 			return nil, fmt.Errorf("failed Scan in Withdrawals: %w", err)
@@ -314,7 +316,7 @@ func (s *storage) GetOrdersForProcess(ctx context.Context, who string, limit uin
 	// TODO use limit
 	rows, err := s.db.QueryContext(ctx, query, 1, who)
 	if err != nil {
-		return nil, fmt.Errorf("failed mark order_for_update: %w", err)
+		return nil, fmt.Errorf("failed mark orders_for_process: %w", err)
 	}
 	defer rows.Close()
 
@@ -323,12 +325,12 @@ func (s *storage) GetOrdersForProcess(ctx context.Context, who string, limit uin
 		var item models.ProcessingOrderItem
 		err := rows.Scan(&item.OrderID, &item.UserID)
 		if err != nil {
-			return nil, fmt.Errorf("failed scan order_for_update: %w", err)
+			return nil, fmt.Errorf("failed scan orders_for_process: %w", err)
 		}
 		result = append(result, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed next order_for_update: %w", err)
+		return nil, fmt.Errorf("failed next orders_for_process: %w", err)
 	}
 
 	return result, nil
@@ -343,11 +345,11 @@ func (s *storage) UpdateOrders(ctx context.Context, data []*models.AccrualOrderI
 	defer tx.Rollback()
 
 	query := `
-		INSERT INTO orders (order_id, status, accrual)
-		VALUES ($1, $2, $3)
+		INSERT INTO orders (order_id, status, accrual, user_id)
+		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (order_id)
 		DO UPDATE SET
-		status = EXCLUDED.status
+		status = EXCLUDED.status,
 		accrual = EXCLUDED.accrual
 	`
 	stmt, err := tx.PrepareContext(ctx, query)
@@ -356,15 +358,15 @@ func (s *storage) UpdateOrders(ctx context.Context, data []*models.AccrualOrderI
 	}
 	defer stmt.Close()
 	for _, ptr := range data {
-		_, err := stmt.ExecContext(ctx, ptr.OrderID, ptr.Status, ptr.Accrual)
+		_, err := stmt.ExecContext(ctx, ptr.OrderID, ptr.Status, ptr.Accrual, ptr.UserID)
 		if err != nil {
 			return fmt.Errorf("failed exec orders: %w", err)
 		}
 	}
 
 	queryDebet := `
-		INSERT INTO debet (order_id, user_id, sum, create_time)
-		VALUES ($1, $2, $3, current_timestamp)
+		INSERT INTO debet_credit (order_id, type, user_id, sum)
+		VALUES ($1, $2, $3, $4)
 	`
 	stmtDebet, err := tx.PrepareContext(ctx, queryDebet)
 	if err != nil {
@@ -372,7 +374,7 @@ func (s *storage) UpdateOrders(ctx context.Context, data []*models.AccrualOrderI
 	}
 	defer stmtDebet.Close()
 
-	queryDelete := "DELETE FROM order_for_process WHERE order_id = $1"
+	queryDelete := "DELETE FROM orders_for_process WHERE order_id = $1"
 	stmtDelete, err := tx.PrepareContext(ctx, queryDelete)
 	if err != nil {
 		return fmt.Errorf("failed prepare delete: %w", err)
@@ -381,7 +383,7 @@ func (s *storage) UpdateOrders(ctx context.Context, data []*models.AccrualOrderI
 
 	for _, ptr := range data {
 		if slices.Contains(models.AccrualOrderTerminateStatus, ptr.Status) {
-			_, err := stmtDebet.ExecContext(ctx, ptr.OrderID, ptr.UserID, ptr.Accrual)
+			_, err := stmtDebet.ExecContext(ctx, ptr.OrderID, models.Debet, ptr.UserID, ptr.Accrual)
 			if err != nil {
 				return fmt.Errorf("failed exec debet: %w", err)
 			}
@@ -393,7 +395,7 @@ func (s *storage) UpdateOrders(ctx context.Context, data []*models.AccrualOrderI
 	}
 
 	query = `
-	UPDATE order_for_process
+	UPDATE orders_for_process
 	SET who_lock=NULL, locked_at=NULL, update_time=current_timestamp
 	WHERE who_lock = $1`
 	_, err = tx.ExecContext(ctx, query, who)
@@ -402,6 +404,19 @@ func (s *storage) UpdateOrders(ctx context.Context, data []*models.AccrualOrderI
 	}
 
 	return tx.Commit()
+}
+
+func (s *storage) CleanOrdersForProcess(ctx context.Context, who string) error {
+	query := `
+		UPDATE orders_for_process
+		SET who_lock=NULL, locked_at=NULL
+		WHERE who_lock = $1
+	`
+	_, err := s.db.ExecContext(ctx, query, who)
+	if err != nil {
+		return fmt.Errorf("failed clean orders_for_process: %w", err)
+	}
+	return nil
 }
 
 type Storager interface {
@@ -415,4 +430,5 @@ type Storager interface {
 	CleanupAfterCrash(ctx context.Context, t time.Duration) error
 	GetOrdersForProcess(ctx context.Context, who string, limit uint) (models.ProcessingOrders, error)
 	UpdateOrders(ctx context.Context, data []*models.AccrualOrderItem, who string) error
+	CleanOrdersForProcess(ctx context.Context, who string) error
 }

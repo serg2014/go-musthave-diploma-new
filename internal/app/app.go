@@ -96,8 +96,41 @@ func (a *App) CleanupAfterCrash(ctx context.Context, t time.Duration) error {
 	return err
 }
 
+func (a *App) worker(ctx context.Context, i int) {
+	for {
+		select {
+		case data := <-a.reqChan:
+			resp := a.getAccrual(data)
+			a.resChan <- resp
+		case <-ctx.Done():
+			logger.Log.Debug("Stop worker", zap.Int("num", i))
+			return
+		}
+	}
+}
+
+func (a *App) getAccrual(item *models.ProcessingOrderItem) *models.AccrualOrderItem {
+	// TODO
+	return &models.AccrualOrderItem{
+		OrderID: item.OrderID,
+		Error:   errors.New("some error"),
+	}
+}
+
 func (a *App) ProcessOrders(ctx context.Context) {
+	// TODO количество воркеров в конфиг
 	// запустить N воркеров читающих из a.reqChan и пишущих в a.resChan
+	for i := range 10 {
+		go a.worker(ctx, i)
+	}
+
+	cleanup := func() {
+		err := a.store.CleanOrdersForProcess(context.Background(), a.who)
+		if err != nil {
+			logger.Log.Error("failed CleanOrdersForProcess", zap.Error(err))
+		}
+	}
+	defer cleanup()
 
 	ticker := time.NewTicker(10 * time.Second)
 	// TODO сбросить метки
@@ -106,6 +139,7 @@ func (a *App) ProcessOrders(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			cleanup()
 			data, err := a.store.GetOrdersForProcess(ctx, a.who, ChanLimit)
 			if err != nil {
 				logger.Log.Error("failed GetOrdersForProcess", zap.Error(err))
@@ -117,19 +151,26 @@ func (a *App) ProcessOrders(ctx context.Context) {
 					a.reqChan <- &data[i]
 				}
 
-				accrual := make([]*models.AccrualOrderItem, len(data))
-				for i := range accrual {
+				accrual := make([]*models.AccrualOrderItem, 0, len(data))
+				for _ = range data {
 					select {
 					case <-ctx.Done():
 						return
 					case itemPtr := <-a.resChan:
-						accrual[i] = itemPtr
+						if itemPtr.Error != nil {
+							logger.Log.Debug(
+								"failed get Accrual",
+								zap.Error(itemPtr.Error),
+								zap.String("orderID", itemPtr.OrderID),
+							)
+						} else {
+							accrual = append(accrual, itemPtr)
+						}
 					}
 				}
 				err := a.store.UpdateOrders(ctx, accrual, a.who)
 				if err != nil {
 					logger.Log.Error("failed UpdateOrders", zap.Error(err))
-					return
 				}
 			}
 		}

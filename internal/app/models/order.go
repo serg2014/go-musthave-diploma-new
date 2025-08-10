@@ -47,4 +47,5 @@ type AccrualOrderItem struct {
 	UserID  UserID             `json:"-"`
 	Status  AccrualOrderStatus `json:"status"`
 	Accrual *uint64            `json:"accrual,omitempty"`
+	Error   error              `json:"-"`
 }
