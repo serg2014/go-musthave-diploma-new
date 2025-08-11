@@ -94,7 +94,7 @@ func main() {
 		}
 	}()
 
-	logger.Log.Info(fmt.Sprintf("Start server on %s", a.Address()))
+	logger.Log.Info(fmt.Sprintf("Start server on %s use accrual service: %s", a.Address(), a.AccrualAddress()))
 	err = srv.ListenAndServe()
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Log.Panic("error in ListenAndServe", zap.Error(err))

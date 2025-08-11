@@ -117,7 +117,7 @@ func (a *App) worker(ctx context.Context, i int) {
 }
 
 func (a *App) getAccrual(item *models.ProcessingOrderItem) *models.AccrualOrderItem {
-	endpoint := fmt.Sprintf("http://%s/api/orders/%s", a.config.AccrualAddress, item.OrderID)
+	endpoint := fmt.Sprintf("%s/api/orders/%s", a.AccrualAddress(), item.OrderID)
 	client := &http.Client{
 		// TODO timeout в конфиг
 		Timeout: 5 * time.Second,

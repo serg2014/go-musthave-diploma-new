@@ -63,6 +63,10 @@ func (a *App) Address() string {
 	return a.config.Address
 }
 
+func (a *App) AccrualAddress() string {
+	return a.config.AccrualAddress
+}
+
 func (a *App) GetRouter() *chi.Mux {
 	return a.router
 }
