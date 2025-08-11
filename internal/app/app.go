@@ -114,7 +114,8 @@ func (a *App) ProcessOrders(ctx context.Context) {
 	}
 	defer cleanup()
 
-	ticker := time.NewTicker(10 * time.Second)
+	// TODO в конфиг
+	ticker := time.NewTicker(1 * time.Second)
 	for {
 		select {
 		case <-ctx.Done():
