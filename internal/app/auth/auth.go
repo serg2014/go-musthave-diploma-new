@@ -34,11 +34,11 @@ func SignPassword(password string) string {
 
 func CreateAuthCookie(userID models.UserID) *http.Cookie {
 	signature := sign(userID[:], secretForCookie)
-	cookie_val := fmt.Sprintf("%s%s%s", userID.String(), CookieAuthSep, signature)
+	cookieVal := fmt.Sprintf("%s%s%s", userID.String(), CookieAuthSep, signature)
 
 	cookie := &http.Cookie{
 		Name:     CookieAuthName,
-		Value:    cookie_val,
+		Value:    cookieVal,
 		Path:     "/",
 		HttpOnly: true,                    // Доступ только через HTTP, защита от XSS
 		SameSite: http.SameSiteStrictMode, // Защита от CSRF

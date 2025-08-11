@@ -24,7 +24,7 @@ func NewConfig() (*Config, error) {
 	flag.StringVar(&cfg.Address, "a", "", "server address")
 	flag.StringVar(&cfg.DatabaseDSN, "d", "", "database dsn")
 	flag.StringVar(&cfg.AccrualAddress, "r", "", "accrual service address")
-	flag.StringVar(&cfg.LogLevel, "l", "info", "log level")
+	flag.StringVar(&cfg.LogLevel, "l", "debug", "log level")
 	flag.Parse()
 
 	if err := env.Parse(&cfg); err != nil {
@@ -47,6 +47,10 @@ func NewConfig() (*Config, error) {
 
 	if cfg.DatabaseDSN == "" {
 		return nil, errors.New("dsn is required")
+	}
+
+	if cfg.AccrualAddress == "" {
+		return nil, errors.New("accrual service address is required")
 	}
 	return &cfg, nil
 }
