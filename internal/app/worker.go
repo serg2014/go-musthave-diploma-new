@@ -15,10 +15,10 @@ import (
 )
 
 var (
-	ErrHttpNoContent           = errors.New("http 204")
-	ErrHttpNTooManyRequets     = errors.New("http 429")
-	ErrHttpInternalServerError = errors.New("http 500")
-	ErrHttpOther               = errors.New("http other")
+	ErrHTTPNoContent           = errors.New("http 204")
+	ErrHTTPNTooManyRequets     = errors.New("http 429")
+	ErrHTTPInternalServerError = errors.New("http 500")
+	ErrHTTPOther               = errors.New("http other")
 	ErrTimeout                 = errors.New("timeout")
 	ErrContext                 = errors.New("error context")
 	ErrDoneContext             = errors.New("done context")
@@ -45,8 +45,8 @@ func geturlWithRetries(ctx context.Context, client *http.Client, url string) (*m
 			// тут таймаут на получении тела
 			// data: <nil> error: bad json: context deadline exceeded (Client.Timeout or context cancellation while reading body)
 			if errors.Is(err, ErrTimeout) ||
-				errors.Is(err, ErrHttpInternalServerError) ||
-				errors.Is(err, ErrHttpNTooManyRequets) {
+				errors.Is(err, ErrHTTPInternalServerError) ||
+				errors.Is(err, ErrHTTPNTooManyRequets) {
 				timeout := time.After(dur)
 				select {
 				case <-timeout:
@@ -78,13 +78,13 @@ func geturl(ctx context.Context, client *http.Client, url string) (*models.Accru
 
 	statusToError := map[int]error{
 		http.StatusOK:                  nil,
-		http.StatusNoContent:           ErrHttpNoContent,
-		http.StatusTooManyRequests:     ErrHttpNTooManyRequets,
-		http.StatusInternalServerError: ErrHttpInternalServerError,
+		http.StatusNoContent:           ErrHTTPNoContent,
+		http.StatusTooManyRequests:     ErrHTTPNTooManyRequets,
+		http.StatusInternalServerError: ErrHTTPInternalServerError,
 	}
 	err, ok := statusToError[response.StatusCode]
 	if !ok {
-		err = ErrHttpOther
+		err = ErrHTTPOther
 	}
 	if err != nil {
 		return nil, err

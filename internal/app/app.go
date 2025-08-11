@@ -129,7 +129,7 @@ func (a *App) ProcessOrders(ctx context.Context) {
 				}
 
 				accrual := make([]*models.AccrualOrderItem, 0, len(data))
-				for _ = range data {
+				for range data {
 					select {
 					case <-ctx.Done():
 						return
