@@ -130,6 +130,8 @@ func (a *App) getAccrual(item *models.ProcessingOrderItem) *models.AccrualOrderI
 			Error:   err,
 		}
 	}
+	// TODO может сделать чтобы geturlWithRetries возвращал UserID
+	data.UserID = item.UserID
 
 	return data
 }
