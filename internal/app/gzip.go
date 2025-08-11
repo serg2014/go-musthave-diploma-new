@@ -54,7 +54,7 @@ func (w *compressWriter) Header() http.Header {
 }
 
 func (w *compressWriter) Write(buf []byte) (int, error) {
-	return w.w.Write(buf)
+	return w.zw.Write(buf)
 }
 
 func (w *compressWriter) WriteHeader(statusCode int) {
