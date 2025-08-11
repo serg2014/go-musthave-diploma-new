@@ -342,8 +342,7 @@ func (s *storage) GetOrdersForProcess(ctx context.Context, who string, limit uin
 		WHERE orders_for_process.ctid = o4p.ctid
 		RETURNING order_id, user_id
 	`
-	// TODO use limit
-	rows, err := s.db.QueryContext(ctx, query, 1, who)
+	rows, err := s.db.QueryContext(ctx, query, limit, who)
 	if err != nil {
 		return nil, fmt.Errorf("failed mark orders_for_process: %w", err)
 	}
