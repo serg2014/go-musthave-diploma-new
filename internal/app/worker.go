@@ -37,26 +37,27 @@ func geturlWithRetries(ctx context.Context, client *http.Client, url string) (*m
 	)
 	for _, dur := range retry {
 		data, err = geturl(ctx, client, url)
-		if err != nil {
-			// TODO как поймать timeout?
-			// in geturl err: Get "http://localhost:8080/api/orders/32": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
-			// data: <nil> error: failed get
-			// data: <nil> error: bad json: EOF - нет тела
-			// тут таймаут на получении тела
-			// data: <nil> error: bad json: context deadline exceeded (Client.Timeout or context cancellation while reading body)
-			if errors.Is(err, ErrTimeout) ||
-				errors.Is(err, ErrHTTPInternalServerError) ||
-				errors.Is(err, ErrHTTPNTooManyRequets) {
-				timeout := time.After(dur)
-				select {
-				case <-timeout:
-					continue
-				case <-ctx.Done():
-					return nil, ErrDoneContext
-				}
-			}
-			return nil, err
+		if err == nil {
+			break
 		}
+		// TODO как поймать timeout?
+		// in geturl err: Get "http://localhost:8080/api/orders/32": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+		// data: <nil> error: failed get
+		// data: <nil> error: bad json: EOF - нет тела
+		// тут таймаут на получении тела
+		// data: <nil> error: bad json: context deadline exceeded (Client.Timeout or context cancellation while reading body)
+		if errors.Is(err, ErrTimeout) ||
+			errors.Is(err, ErrHTTPInternalServerError) ||
+			errors.Is(err, ErrHTTPNTooManyRequets) {
+			timeout := time.After(dur)
+			select {
+			case <-timeout:
+				continue
+			case <-ctx.Done():
+				return nil, ErrDoneContext
+			}
+		}
+		return nil, err
 	}
 
 	return data, err
