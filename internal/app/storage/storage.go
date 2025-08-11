@@ -249,7 +249,7 @@ func (s *storage) Withdraw(ctx context.Context, userID models.UserID, orderID st
 	defer tx.Rollback()
 
 	query := `
-		SELECT accrual, withdrawn 
+		SELECT "sum", "type" 
 		FROM debet_credit
 		WHERE user_id = $1
 		FOR UPDATE
