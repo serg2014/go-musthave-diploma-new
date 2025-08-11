@@ -10,20 +10,20 @@ type RegisterUser struct {
 }
 
 type Balance struct {
-	Current   uint32 `json:"current"`
-	Withdrawn uint32 `json:"withdrawn"`
+	Current   float32 `json:"current"`
+	Withdrawn float32 `json:"withdrawn"`
 }
 
 type UserID = uuid.UUID
 
 type WithdrawnRequest struct {
 	OrderID OrderID `json:"order"`
-	Sum     uint32  `json:"sum"`
+	Sum     float32 `json:"sum"`
 }
 
 type Withdrawal struct {
 	OrderID    OrderID `json:"order"`
-	Sum        uint32  `json:"sum"`
+	Sum        float32 `json:"sum"`
 	CreateTime string  `json:"processed_at"`
 }
 type Withdrawals []Withdrawal

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"time"
 
@@ -18,6 +19,8 @@ import (
 	"github.com/serg2014/go-musthave-diploma/internal/logger"
 	"go.uber.org/zap"
 )
+
+const Accuracy float64 = 1000
 
 var ErrUserExists = errors.New("user exists")
 var ErrUserOrPassword = errors.New("bad user or password")
@@ -126,7 +129,6 @@ func (s *storage) CreateOrder(ctx context.Context, orderID string, userID models
 	}
 	defer tx.Rollback()
 
-	// insert два раза одного и того же order_id, user_id - 23505
 	query := `
 	INSERT INTO orders (order_id, user_id, upload_time, status)
 	VALUES($1, $2, current_timestamp, $3)
@@ -181,8 +183,14 @@ func (s *storage) GetUserOrders(ctx context.Context, userID models.UserID) (mode
 	orders := make(models.Orders, 0, 10)
 	for rows.Next() {
 		var order models.OrderItem
+		var sum *int32
 		// TODO время в формате RFC3339
-		err := rows.Scan(&order.OrderID, &order.UploadTime, &order.Status, &order.Accrual)
+		err := rows.Scan(&order.OrderID, &order.UploadTime, &order.Status, &sum)
+		if sum != nil {
+			v := int2float(*sum)
+			order.Accrual = &v
+		}
+
 		if err != nil {
 			return nil, fmt.Errorf("failed Scan in GetUserOrders: %w", err)
 		}
@@ -207,15 +215,33 @@ func (s *storage) Balance(ctx context.Context, userID models.UserID) (*models.Ba
 		)
 	`
 	row := s.db.QueryRowContext(ctx, query, userID)
-	var balance models.Balance
-	err := row.Scan(&balance.Current, &balance.Withdrawn)
+
+	var current int32
+	var withdrawn int32
+	err := row.Scan(&current, &withdrawn)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("failed Balance: %w", err)
+	}
+	var balance models.Balance
+	if current != 0 {
+		balance.Current = int2float(current)
+	}
+	if withdrawn != 0 {
+		balance.Withdrawn = int2float(withdrawn)
 	}
 	return &balance, nil
 }
 
-func (s *storage) Withdraw(ctx context.Context, userID models.UserID, orderID string, sum uint32) error {
+func float2int(val float32) int32 {
+	// TODO переполнение
+	return int32(math.Round(float64(val) * Accuracy))
+}
+func int2float(val int32) float32 {
+	// TODO переполнение
+	return float32(float64(val) / Accuracy)
+}
+
+func (s *storage) Withdraw(ctx context.Context, userID models.UserID, orderID string, sum float32) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed begin transaction: %w", err)
@@ -232,19 +258,7 @@ func (s *storage) Withdraw(ctx context.Context, userID models.UserID, orderID st
 	if err != nil {
 		return fmt.Errorf("failed for update: %w", err)
 	}
-	// query = `
-	// 	UPDATE users_balance
-	// 	SET withdrawn=withdrawn+$1, accrual=accrual-$1
-	// 	WHERE user_id = $1 AND accrual>=$2
-	// `
-	// result, err := tx.ExecContext(ctx, query, userID, sum)
-	// if err != nil {
-	// 	return fmt.Errorf("failed update user_balance: %w", err)
-	// }
-	// ra, _ := result.RowsAffected()
-	// if ra == 0 {
-	// 	return ErrNotEnoughMoney
-	// }
+
 	query = `
 		SELECT user_id
 		FROM (
@@ -257,7 +271,7 @@ func (s *storage) Withdraw(ctx context.Context, userID models.UserID, orderID st
 		)
 		WHERE accrual >= withdrawn + $2
 	`
-	row := tx.QueryRowContext(ctx, query, userID, sum)
+	row := tx.QueryRowContext(ctx, query, userID, float2int(sum))
 	var user models.UserID
 	err = row.Scan(&user)
 	if err != nil {
@@ -271,7 +285,7 @@ func (s *storage) Withdraw(ctx context.Context, userID models.UserID, orderID st
 		INSERT INTO debet_credit (order_id, type, user_id, sum)
 		VALUES($1, $2, $3, $4)
 	`
-	_, err = tx.ExecContext(ctx, query, orderID, models.Credit, userID, sum)
+	_, err = tx.ExecContext(ctx, query, orderID, models.Credit, userID, float2int(sum))
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) {
@@ -300,11 +314,13 @@ func (s *storage) Withdrawals(ctx context.Context, userID models.UserID) (models
 	withdrawals := make(models.Withdrawals, 0, 10)
 	for rows.Next() {
 		var withdrawal models.Withdrawal
+		var sum int32
 		// TODO время в формате RFC3339
-		err := rows.Scan(&withdrawal.OrderID, &withdrawal.Sum, &withdrawal.CreateTime)
+		err := rows.Scan(&withdrawal.OrderID, &sum, &withdrawal.CreateTime)
 		if err != nil {
 			return nil, fmt.Errorf("failed Scan in Withdrawals: %w", err)
 		}
+		withdrawal.Sum = int2float(sum)
 		withdrawals = append(withdrawals, withdrawal)
 	}
 
@@ -387,7 +403,12 @@ func (s *storage) UpdateOrders(ctx context.Context, data []*models.AccrualOrderI
 	defer stmt.Close()
 
 	for _, ptr := range data {
-		_, err := stmt.ExecContext(ctx, ptr.OrderID, ptr.Status, ptr.Accrual, ptr.UserID)
+		var sum *int32
+		if ptr.Accrual != nil {
+			v := float2int(*ptr.Accrual)
+			sum = &v
+		}
+		_, err := stmt.ExecContext(ctx, ptr.OrderID, ptr.Status, sum, ptr.UserID)
 		if err != nil {
 			return fmt.Errorf("failed exec orders: %w", err)
 		}
@@ -412,7 +433,12 @@ func (s *storage) UpdateOrders(ctx context.Context, data []*models.AccrualOrderI
 
 	for _, ptr := range data {
 		if slices.Contains(models.AccrualOrderTerminateStatus, ptr.Status) {
-			_, err := stmtDebet.ExecContext(ctx, ptr.OrderID, models.Debet, ptr.UserID, ptr.Accrual)
+			var sum *int32
+			if ptr.Accrual != nil {
+				v := float2int(*ptr.Accrual)
+				sum = &v
+			}
+			_, err := stmtDebet.ExecContext(ctx, ptr.OrderID, models.Debet, ptr.UserID, sum)
 			if err != nil {
 				return fmt.Errorf("failed exec debet: %w", err)
 			}
@@ -454,7 +480,7 @@ type Storager interface {
 	CreateOrder(ctx context.Context, orderID string, userID models.UserID) error
 	GetUserOrders(ctx context.Context, userID models.UserID) (models.Orders, error)
 	Balance(ctx context.Context, userID models.UserID) (*models.Balance, error)
-	Withdraw(ctx context.Context, userID models.UserID, orderID string, sum uint32) error
+	Withdraw(ctx context.Context, userID models.UserID, orderID string, sum float32) error
 	Withdrawals(ctx context.Context, userID models.UserID) (models.Withdrawals, error)
 	CleanupAfterCrash(ctx context.Context, t time.Duration) error
 	GetOrdersForProcess(ctx context.Context, who string, limit uint) (models.ProcessingOrders, error)
