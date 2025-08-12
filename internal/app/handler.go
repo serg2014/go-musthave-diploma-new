@@ -137,7 +137,6 @@ func (a *App) createOrder() http.HandlerFunc {
 	}
 }
 
-// TODO формат даты
 func (a *App) GetOrders() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, err := usercontext.GetUserID(r.Context())
@@ -197,7 +196,8 @@ func (a *App) Balance() http.HandlerFunc {
 	}
 }
 
-// TODO вынести авторизацию в middleware
+// TODO userID проверяем в AuthMiddleware поэтому тут он всегда есть
+// но что делать если добавили новый хендлер и забыли хендлер поместить в группу с AuthMiddleware
 func (a *App) Withdraw() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, err := usercontext.GetUserID(r.Context())
@@ -237,7 +237,6 @@ func (a *App) Withdraw() http.HandlerFunc {
 	}
 }
 
-// TODO формат даты
 func (a *App) Withdrawals() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, err := usercontext.GetUserID(r.Context())

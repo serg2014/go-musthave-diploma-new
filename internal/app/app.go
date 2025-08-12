@@ -71,6 +71,14 @@ func (a *App) GetRouter() *chi.Mux {
 	return a.router
 }
 
+func (a *App) GetShutdownTimeout() time.Duration {
+	return a.config.ShutdownTimeout
+}
+
+func (a *App) GetCleanupAfterCrashDuration() time.Duration {
+	return a.config.CleanupAfterCrashDuration
+}
+
 func checkLuhn(code string) error {
 	_, err := strconv.Atoi(code)
 	if err != nil {
@@ -101,8 +109,7 @@ func (a *App) CleanupAfterCrash(ctx context.Context, t time.Duration) error {
 }
 
 func (a *App) ProcessOrders(ctx context.Context) {
-	// TODO количество воркеров в конфиг
-	for i := range 10 {
+	for i := range a.config.WorkerCount {
 		go a.worker(ctx, i)
 	}
 
@@ -114,8 +121,7 @@ func (a *App) ProcessOrders(ctx context.Context) {
 	}
 	defer cleanup()
 
-	// TODO в конфиг
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(a.config.OrdersForProcessDuration)
 	for {
 		select {
 		case <-ctx.Done():

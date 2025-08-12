@@ -42,8 +42,7 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		// TODO const or conf
-		period := 2 * time.Hour
+		period := a.GetCleanupAfterCrashDuration()
 		ticker := time.NewTicker(period)
 		for {
 			err := a.CleanupAfterCrash(ctx, period)
@@ -85,9 +84,7 @@ func main() {
 			logger.Log.Info("stop")
 		}
 
-		// даем 5 секунд на завершение
-		// TODO время в конфиг
-		ctxT, cancelT := context.WithTimeout(context.Background(), 5*time.Second)
+		ctxT, cancelT := context.WithTimeout(context.Background(), a.GetShutdownTimeout())
 		defer cancelT()
 		if err := srv.Shutdown(ctxT); err != nil {
 			logger.Log.Info("Server forced to shutdown", zap.Error(err))

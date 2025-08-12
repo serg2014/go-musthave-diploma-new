@@ -235,7 +235,6 @@ func float2int(val float32) int32 {
 	return int32(math.Round(float64(val) * Accuracy))
 }
 func int2float(val int32) float32 {
-	// TODO переполнение
 	return float32(float64(val) / Accuracy)
 }
 

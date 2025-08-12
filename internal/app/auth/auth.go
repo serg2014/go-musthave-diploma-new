@@ -46,7 +46,6 @@ func CreateAuthCookie(userID models.UserID) *http.Cookie {
 	return cookie
 }
 
-// ====
 func checkToken(token string) (*models.UserID, error) {
 	items := strings.Split(token, CookieAuthSep)
 	if len(items) != 2 {

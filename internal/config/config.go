@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"time"
 
 	"github.com/caarlos0/env/v11"
 )
@@ -16,10 +17,26 @@ type Config struct {
 	AccrualAddress string `env:"ACCRUAL_SYSTEM_ADDRESS"`
 	LogLevel       string
 	Port           uint16
+	// таймаут на get запрос в систему лояльости
+	HttpClientTimeout time.Duration
+	// количество воркеров для похода в систему лояльности
+	WorkerCount uint8
+	// с каким периодом обрабатываем запросы
+	OrdersForProcessDuration time.Duration
+	// даем ShutdownTimeout секунд на завершение работы сервера
+	ShutdownTimeout time.Duration
+	// с каким периодом делаем очистку
+	CleanupAfterCrashDuration time.Duration
 }
 
 func NewConfig() (*Config, error) {
-	var cfg Config
+	cfg := Config{
+		HttpClientTimeout:         5 * time.Second,
+		WorkerCount:               10,
+		OrdersForProcessDuration:  1 * time.Second,
+		ShutdownTimeout:           5 * time.Second,
+		CleanupAfterCrashDuration: 2 * time.Hour,
+	}
 
 	flag.StringVar(&cfg.Address, "a", "", "server address")
 	flag.StringVar(&cfg.DatabaseDSN, "d", "", "database dsn")

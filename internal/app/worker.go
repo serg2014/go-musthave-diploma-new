@@ -97,14 +97,14 @@ func geturl(ctx context.Context, client *http.Client, url string) (*models.Accru
 	return &data, nil
 }
 
-func (a *App) worker(ctx context.Context, i int) {
+func (a *App) worker(ctx context.Context, i uint8) {
 	for {
 		select {
 		case data := <-a.reqChan:
 			resp := a.getAccrual(data)
 			a.resChan <- resp
 		case <-ctx.Done():
-			logger.Log.Debug("Stop worker", zap.Int("num", i))
+			logger.Log.Debug("Stop worker", zap.Uint8("num", i))
 			return
 		}
 	}
@@ -113,8 +113,7 @@ func (a *App) worker(ctx context.Context, i int) {
 func (a *App) getAccrual(item *models.ProcessingOrderItem) *models.AccrualOrderItem {
 	endpoint := fmt.Sprintf("%s/api/orders/%s", a.AccrualAddress(), item.OrderID)
 	client := &http.Client{
-		// TODO timeout в конфиг
-		Timeout: 5 * time.Second,
+		Timeout: a.config.HttpClientTimeout,
 	}
 	data, err := geturlWithRetries(context.Background(), client, endpoint)
 	if err != nil {
