@@ -16,7 +16,7 @@ CREATE INDEX orders_user_id_idx ON orders (user_id);
 CREATE TABLE IF NOT EXISTS orders_for_process (
     order_id text NOT NULL PRIMARY KEY,
     user_id uuid NOT NULL,
-    who_lock char(20),
+    who_lock varchar(30),
     locked_at timestamptz,
     update_time timestamptz NOT NULL
 );

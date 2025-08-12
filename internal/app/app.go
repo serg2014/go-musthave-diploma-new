@@ -3,11 +3,11 @@ package app
 import (
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -22,14 +22,16 @@ import (
 const ChanLimit = 100
 
 func generateWho(port uint16) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "%x%x", time.Now().Unix(), port)
-	randLength := 4
-	part2 := make([]byte, randLength)
-	rand.Read(part2)
-	b.WriteString(hex.EncodeToString(part2))
-	// len(b.String()) = 4 + 2 + 4(randLength) = 10
-	return b.String()
+	// time + rnd + port = 8 + 4 + 2 = 14
+	b := make([]byte, 14)
+	t := uint64(time.Now().Unix())
+	binary.BigEndian.PutUint64(b[0:8], t)
+
+	c := b[8:12]
+	rand.Read(c)
+
+	binary.BigEndian.PutUint16(b[12:14], port)
+	return hex.EncodeToString(b)
 }
 
 type App struct {
