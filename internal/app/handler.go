@@ -25,7 +25,6 @@ func (a *App) setRoute() {
 
 	r.Group(func(r chi.Router) {
 		r.Use(auth.AuthMiddleware)
-		//r.Use(middleware.Recoverer)
 
 		r.Route("/api/user", func(r chi.Router) {
 			r.Post("/orders", a.createOrder())
@@ -171,7 +170,6 @@ func (a *App) GetOrders() http.HandlerFunc {
 	}
 }
 
-// TODO посмотреть может ли быть балланс дробным
 func (a *App) Balance() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, err := usercontext.GetUserID(r.Context())

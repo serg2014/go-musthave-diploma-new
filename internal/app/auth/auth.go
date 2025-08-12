@@ -94,7 +94,7 @@ func WithUserMiddleware(h http.Handler) http.Handler {
 		if err != nil {
 			logger.Log.Debug("no user id from cookie", zap.Error(err))
 		}
-		// rew - request with user
+		// rwu - request with user
 		rwu := r
 		if err == nil {
 			// сохраним в контекст

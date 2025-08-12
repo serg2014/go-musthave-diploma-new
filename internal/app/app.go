@@ -18,6 +18,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// должен быть согласован с лимитом в update
 const ChanLimit = 100
 
 func generateWho(port uint16) string {
@@ -46,10 +47,9 @@ func NewApp(cnf *config.Config) (*App, error) {
 		return nil, fmt.Errorf("filed to create NewStorage: %w", err)
 	}
 	app := &App{
-		config: cnf,
-		router: chi.NewRouter(),
-		store:  s,
-		// TODO должен быть согласован с лимитом в update
+		config:  cnf,
+		router:  chi.NewRouter(),
+		store:   s,
 		reqChan: make(chan *models.ProcessingOrderItem, ChanLimit),
 		resChan: make(chan *models.AccrualOrderItem, ChanLimit),
 		who:     generateWho(cnf.Port),

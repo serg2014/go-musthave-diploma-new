@@ -40,12 +40,6 @@ func geturlWithRetries(ctx context.Context, client *http.Client, url string) (*m
 		if err == nil {
 			break
 		}
-		// TODO как поймать timeout?
-		// in geturl err: Get "http://localhost:8080/api/orders/32": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
-		// data: <nil> error: failed get
-		// data: <nil> error: bad json: EOF - нет тела
-		// тут таймаут на получении тела
-		// data: <nil> error: bad json: context deadline exceeded (Client.Timeout or context cancellation while reading body)
 		if errors.Is(err, ErrTimeout) ||
 			errors.Is(err, ErrHTTPInternalServerError) ||
 			errors.Is(err, ErrHTTPNTooManyRequets) {
@@ -130,7 +124,6 @@ func (a *App) getAccrual(item *models.ProcessingOrderItem) *models.AccrualOrderI
 			Error:   err,
 		}
 	}
-	// TODO может сделать чтобы geturlWithRetries возвращал UserID
 	data.UserID = item.UserID
 
 	return data
