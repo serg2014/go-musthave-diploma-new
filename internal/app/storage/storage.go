@@ -184,15 +184,13 @@ func (s *storage) GetUserOrders(ctx context.Context, userID models.UserID) (mode
 	for rows.Next() {
 		var order models.OrderItem
 		var sum *int32
-		// TODO время в формате RFC3339
 		err := rows.Scan(&order.OrderID, &order.UploadTime, &order.Status, &sum)
+		if err != nil {
+			return nil, fmt.Errorf("failed Scan in GetUserOrders: %w", err)
+		}
 		if sum != nil {
 			v := int2float(*sum)
 			order.Accrual = &v
-		}
-
-		if err != nil {
-			return nil, fmt.Errorf("failed Scan in GetUserOrders: %w", err)
 		}
 		orders = append(orders, order)
 	}
@@ -315,7 +313,6 @@ func (s *storage) Withdrawals(ctx context.Context, userID models.UserID) (models
 	for rows.Next() {
 		var withdrawal models.Withdrawal
 		var sum int32
-		// TODO время в формате RFC3339
 		err := rows.Scan(&withdrawal.OrderID, &sum, &withdrawal.CreateTime)
 		if err != nil {
 			return nil, fmt.Errorf("failed Scan in Withdrawals: %w", err)
