@@ -113,7 +113,7 @@ func (a *App) worker(ctx context.Context, i uint8) {
 func (a *App) getAccrual(item *models.ProcessingOrderItem) *models.AccrualOrderItem {
 	endpoint := fmt.Sprintf("%s/api/orders/%s", a.AccrualAddress(), item.OrderID)
 	client := &http.Client{
-		Timeout: a.config.HttpClientTimeout,
+		Timeout: a.config.HTTPClientTimeout,
 	}
 	data, err := geturlWithRetries(context.Background(), client, endpoint)
 	if err != nil {

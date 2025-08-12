@@ -18,7 +18,7 @@ type Config struct {
 	LogLevel       string
 	Port           uint16
 	// таймаут на get запрос в систему лояльости
-	HttpClientTimeout time.Duration
+	HTTPClientTimeout time.Duration
 	// количество воркеров для похода в систему лояльности
 	WorkerCount uint8
 	// с каким периодом обрабатываем запросы
@@ -31,7 +31,7 @@ type Config struct {
 
 func NewConfig() (*Config, error) {
 	cfg := Config{
-		HttpClientTimeout:         5 * time.Second,
+		HTTPClientTimeout:         5 * time.Second,
 		WorkerCount:               10,
 		OrdersForProcessDuration:  1 * time.Second,
 		ShutdownTimeout:           5 * time.Second,
