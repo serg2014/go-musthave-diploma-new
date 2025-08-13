@@ -21,6 +21,9 @@ import (
 // должен быть согласован с лимитом в update
 const ChanLimit = 100
 
+var ErrLuhnNotDigit = errors.New("not digit")
+var ErrLuhn = errors.New("bad check")
+
 func generateWho(port uint16) string {
 	// time + rnd + port = 8 + 4 + 2 = 14
 	b := make([]byte, 14)
@@ -84,7 +87,7 @@ func (a *App) GetCleanupAfterCrashDuration() time.Duration {
 func checkLuhn(code string) error {
 	_, err := strconv.Atoi(code)
 	if err != nil {
-		return errors.New("not digit")
+		return ErrLuhnNotDigit
 	}
 
 	sum := 0
@@ -100,7 +103,7 @@ func checkLuhn(code string) error {
 		sum += digit
 	}
 	if sum%10 != 0 {
-		return errors.New("bad check")
+		return ErrLuhn
 	}
 	return nil
 }
