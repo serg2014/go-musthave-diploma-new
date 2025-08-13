@@ -1,0 +1,485 @@
+package storage
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"math"
+	"slices"
+	"time"
+
+	"github.com/golang-migrate/migrate"
+	"github.com/golang-migrate/migrate/database/postgres"
+	_ "github.com/golang-migrate/migrate/source/file"
+	"github.com/jackc/pgerrcode"
+	"github.com/jackc/pgx/v5/pgconn"
+	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/serg2014/go-musthave-diploma/internal/app/models"
+	"github.com/serg2014/go-musthave-diploma/internal/logger"
+	"go.uber.org/zap"
+)
+
+const Accuracy float64 = 1000
+
+var ErrUserExists = errors.New("user exists")
+var ErrUserOrPassword = errors.New("bad user or password")
+var ErrOrderAnotherUser = errors.New("order another user")
+var ErrOrderExists = errors.New("order exists")
+var ErrNotEnoughMoney = errors.New("not enough money")
+var ErrOrderWithdrawnExists = errors.New("order withdrawn exists")
+
+type User struct {
+	ID    models.UserID
+	Login string
+	Hash  string
+}
+
+type storage struct {
+	db *sql.DB
+}
+
+func NewStorage(ctx context.Context, dsn string) (Storager, error) {
+	// dsn = "host=%s user=%s password=%s dbname=%s sslmode=disable"
+	// dsn = "postgres://user:password@host:port/dbname?sslmode=disable"
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed connect to db: %w", err)
+	}
+	// проверяем подключение к бд
+	if err = db.Ping(); err != nil {
+		return nil, fmt.Errorf("failed to ping db: %v", err)
+	}
+	logger.Log.Info("Connected to db")
+
+	// миграции
+	driver, err := postgres.WithInstance(db, &postgres.Config{})
+	if err != nil {
+		return nil, fmt.Errorf("can not set migrations: %w", err)
+	}
+
+	// TODO file://migrations путь задается относительно cwd
+	// предполагается что запуск бинаря происходит в корне репозитория
+	m, err := migrate.NewWithDatabaseInstance(
+		"file://migrations",
+		dsn,
+		driver,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("can not find migrations: %w", err)
+	}
+	if err = m.Up(); err != nil && err != migrate.ErrNoChange {
+		logger.Log.Error("migrations", zap.Error(err))
+		// TODO в случае проблем с миграцией сообщение об ошибке говорит что не найдет файл
+		// и все. путь к файлу не пишут
+		return nil, fmt.Errorf("problem with Up migration: %w", err)
+	}
+
+	return &storage{db: db}, nil
+}
+
+func (s *storage) CreateUser(ctx context.Context, login, passwordHash string) (*models.UserID, error) {
+	// начать транзакцию
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed transaction in CreateUser: %w", err)
+	}
+	defer tx.Rollback()
+
+	query := `INSERT INTO users (login, hash) VALUES($1, $2) RETURNING user_id`
+	row := tx.QueryRowContext(ctx, query, login, passwordHash)
+	var user User
+	err = row.Scan(&user.ID)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			if pgErr.Code == pgerrcode.UniqueViolation {
+				return nil, ErrUserExists
+			}
+		}
+		return nil, fmt.Errorf("failed CreateUser. can not insert users: %w", err)
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return nil, fmt.Errorf("failed commit transaction: %w", err)
+	}
+	return &user.ID, nil
+}
+
+func (s *storage) GetUser(ctx context.Context, login, passwordHash string) (*models.UserID, error) {
+	query := `SELECT user_id FROM users WHERE login=$1 AND hash=$2`
+	row := s.db.QueryRowContext(ctx, query, login, passwordHash)
+	var user User
+	err := row.Scan(&user.ID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrUserOrPassword
+		}
+		return nil, fmt.Errorf("failed GetUser. can not select: %w", err)
+	}
+	return &user.ID, nil
+}
+
+func (s *storage) CreateOrder(ctx context.Context, orderID string, userID models.UserID) error {
+	// начать транзакцию
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed SetBatch: %w", err)
+	}
+	defer tx.Rollback()
+
+	query := `
+	INSERT INTO orders (order_id, user_id, upload_time, status)
+	VALUES($1, $2, current_timestamp, $3)
+	ON CONFLICT (order_id) DO NOTHING`
+	result, err := tx.ExecContext(ctx, query, orderID, userID, models.OrderNew)
+	if err != nil {
+		return fmt.Errorf("failed CreateOrder: %w", err)
+	}
+	ra, _ := result.RowsAffected()
+	if ra == 0 {
+		// сразу отменяем транзакцию
+		tx.Rollback()
+
+		query = `
+		SELECT order_id
+		FROM orders
+		WHERE order_id = $1 AND user_id = $2`
+		result, err = s.db.ExecContext(ctx, query, orderID, userID)
+		if err != nil {
+			return fmt.Errorf("failed CreateOrder: %w", err)
+		}
+		ra, _ = result.RowsAffected()
+		if ra == 0 {
+			return ErrOrderAnotherUser
+		}
+		return ErrOrderExists
+	}
+
+	query = `
+	INSERT INTO orders_for_process (order_id, user_id, update_time)
+	VALUES($1, $2, current_timestamp)`
+	_, err = tx.ExecContext(ctx, query, orderID, userID)
+	if err != nil {
+		return fmt.Errorf("failed CreateOrder: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+func (s *storage) GetUserOrders(ctx context.Context, userID models.UserID) (models.Orders, error) {
+	query := `
+		SELECT order_id, upload_time, status, accrual
+		FROM orders
+		WHERE user_id = $1
+		ORDER BY upload_time DESC`
+	rows, err := s.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed select in GetUserOrders: %w", err)
+	}
+	defer rows.Close()
+
+	orders := make(models.Orders, 0, 10)
+	for rows.Next() {
+		var order models.OrderItem
+		var sum *int32
+		err := rows.Scan(&order.OrderID, &order.UploadTime, &order.Status, &sum)
+		if err != nil {
+			return nil, fmt.Errorf("failed Scan in GetUserOrders: %w", err)
+		}
+		if sum != nil {
+			v := int2float(*sum)
+			order.Accrual = &v
+		}
+		orders = append(orders, order)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("faild row: %w", err)
+	}
+	return orders, nil
+}
+
+func (s *storage) Balance(ctx context.Context, userID models.UserID) (*models.Balance, error) {
+	query := `
+		SELECT accrual-withdrawn as current, withdrawn
+		FROM (
+			SELECT sum(case when "type" = 'CREDIT' then "sum" else 0 end) as withdrawn,
+ 			       sum(case when "type" = 'DEBET' then "sum" else 0 end) as accrual
+			FROM debet_credit
+			WHERE user_id = $1
+			GROUP BY user_id
+		)
+	`
+	row := s.db.QueryRowContext(ctx, query, userID)
+
+	var current int32
+	var withdrawn int32
+	err := row.Scan(&current, &withdrawn)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("failed Balance: %w", err)
+	}
+	var balance models.Balance
+	if current != 0 {
+		balance.Current = int2float(current)
+	}
+	if withdrawn != 0 {
+		balance.Withdrawn = int2float(withdrawn)
+	}
+	return &balance, nil
+}
+
+func float2int(val float32) int32 {
+	// TODO переполнение
+	return int32(math.Round(float64(val) * Accuracy))
+}
+func int2float(val int32) float32 {
+	return float32(float64(val) / Accuracy)
+}
+
+func (s *storage) Withdraw(ctx context.Context, userID models.UserID, orderID string, sum float32) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	query := `
+		SELECT "sum", "type" 
+		FROM debet_credit
+		WHERE user_id = $1
+		FOR UPDATE
+	`
+	_, err = tx.ExecContext(ctx, query, userID)
+	if err != nil {
+		return fmt.Errorf("failed for update: %w", err)
+	}
+
+	query = `
+		SELECT user_id
+		FROM (
+			SELECT sum(case when "type" = 'CREDIT' then "sum" else 0 end) as withdrawn,
+ 				   sum(case when "type" = 'DEBET' then "sum" else 0 end) as accrual,
+ 				   user_id
+			FROM debet_credit
+			WHERE user_id = $1
+			GROUP BY user_id
+		)
+		WHERE accrual >= withdrawn + $2
+	`
+	row := tx.QueryRowContext(ctx, query, userID, float2int(sum))
+	var user models.UserID
+	err = row.Scan(&user)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return ErrNotEnoughMoney
+		}
+		return fmt.Errorf("failed balance from debet_credit: %w", err)
+	}
+
+	query = `
+		INSERT INTO debet_credit (order_id, type, user_id, sum)
+		VALUES($1, $2, $3, $4)
+	`
+	_, err = tx.ExecContext(ctx, query, orderID, models.Credit, userID, float2int(sum))
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			if pgErr.Code == pgerrcode.UniqueViolation {
+				return ErrOrderWithdrawnExists
+			}
+		}
+		return fmt.Errorf("failed insert debet_credit: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+func (s *storage) Withdrawals(ctx context.Context, userID models.UserID) (models.Withdrawals, error) {
+	query := `
+		SELECT order_id, sum, create_time
+		FROM debet_credit
+		WHERE user_id = $1 AND type = $2
+	`
+	rows, err := s.db.QueryContext(ctx, query, userID, models.Credit)
+	if err != nil {
+		return nil, fmt.Errorf("failed Withdrawals: %w", err)
+	}
+	defer rows.Close()
+
+	withdrawals := make(models.Withdrawals, 0, 10)
+	for rows.Next() {
+		var withdrawal models.Withdrawal
+		var sum int32
+		err := rows.Scan(&withdrawal.OrderID, &sum, &withdrawal.CreateTime)
+		if err != nil {
+			return nil, fmt.Errorf("failed Scan in Withdrawals: %w", err)
+		}
+		withdrawal.Sum = int2float(sum)
+		withdrawals = append(withdrawals, withdrawal)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed Withdrawals: %w", err)
+	}
+	return withdrawals, nil
+}
+
+func (s *storage) CleanupAfterCrash(ctx context.Context, t time.Duration) error {
+	query := `
+		UPDATE orders_for_process
+		SET who_lock=NULL, locked_at=NULL
+		WHERE locked_at <= NOW() - make_interval(hours => $1)
+	`
+	_, err := s.db.ExecContext(ctx, query, t.Hours())
+	if err != nil {
+		return fmt.Errorf("failed cleanup: %w", err)
+	}
+	return nil
+}
+
+func (s *storage) GetOrdersForProcess(ctx context.Context, who string, limit uint) (models.ProcessingOrders, error) {
+	query := `
+		WITH o4p AS (
+		  SELECT o.ctid FROM orders_for_process AS o
+		    WHERE o.who_lock IS NULL
+		    ORDER BY o.update_time
+		    FOR UPDATE
+		    LIMIT $1
+		)
+		UPDATE orders_for_process
+		SET who_lock=$2, locked_at=current_timestamp
+		FROM o4p
+		WHERE orders_for_process.ctid = o4p.ctid
+		RETURNING order_id, user_id
+	`
+	rows, err := s.db.QueryContext(ctx, query, limit, who)
+	if err != nil {
+		return nil, fmt.Errorf("failed mark orders_for_process: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(models.ProcessingOrders, 0, limit)
+	for rows.Next() {
+		var item models.ProcessingOrderItem
+		err := rows.Scan(&item.OrderID, &item.UserID)
+		if err != nil {
+			return nil, fmt.Errorf("failed scan orders_for_process: %w", err)
+		}
+		result = append(result, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed next orders_for_process: %w", err)
+	}
+
+	return result, nil
+}
+
+func (s *storage) UpdateOrders(ctx context.Context, data []*models.AccrualOrderItem, who string) error {
+	// начать транзакцию
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed transaction in UpdateOrders: %w", err)
+	}
+	defer tx.Rollback()
+
+	query := `
+		INSERT INTO orders (order_id, status, accrual, user_id)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (order_id)
+		DO UPDATE SET
+		status = EXCLUDED.status,
+		accrual = EXCLUDED.accrual
+	`
+	stmt, err := tx.PrepareContext(ctx, query)
+	if err != nil {
+		return fmt.Errorf("failed prepare orders: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, ptr := range data {
+		var sum *int32
+		if ptr.Accrual != nil {
+			v := float2int(*ptr.Accrual)
+			sum = &v
+		}
+		_, err := stmt.ExecContext(ctx, ptr.OrderID, ptr.Status, sum, ptr.UserID)
+		if err != nil {
+			return fmt.Errorf("failed exec orders: %w", err)
+		}
+	}
+
+	queryDebet := `
+		INSERT INTO debet_credit (order_id, type, user_id, sum)
+		VALUES ($1, $2, $3, $4)
+	`
+	stmtDebet, err := tx.PrepareContext(ctx, queryDebet)
+	if err != nil {
+		return fmt.Errorf("failed prepare debet: %w", err)
+	}
+	defer stmtDebet.Close()
+
+	queryDelete := "DELETE FROM orders_for_process WHERE order_id = $1"
+	stmtDelete, err := tx.PrepareContext(ctx, queryDelete)
+	if err != nil {
+		return fmt.Errorf("failed prepare delete: %w", err)
+	}
+	defer stmtDelete.Close()
+
+	for _, ptr := range data {
+		if slices.Contains(models.AccrualOrderTerminateStatus, ptr.Status) {
+			var sum *int32
+			if ptr.Accrual != nil {
+				v := float2int(*ptr.Accrual)
+				sum = &v
+			}
+			_, err := stmtDebet.ExecContext(ctx, ptr.OrderID, models.Debet, ptr.UserID, sum)
+			if err != nil {
+				return fmt.Errorf("failed exec debet: %w", err)
+			}
+			_, err = stmtDelete.ExecContext(ctx, ptr.OrderID)
+			if err != nil {
+				return fmt.Errorf("failed exec delete: %w", err)
+			}
+		}
+	}
+
+	query = `
+	UPDATE orders_for_process
+	SET who_lock=NULL, locked_at=NULL, update_time=current_timestamp
+	WHERE who_lock = $1`
+	_, err = tx.ExecContext(ctx, query, who)
+	if err != nil {
+		return fmt.Errorf("failed reset who_lock: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+func (s *storage) CleanOrdersForProcess(ctx context.Context, who string) error {
+	query := `
+		UPDATE orders_for_process
+		SET who_lock=NULL, locked_at=NULL
+		WHERE who_lock = $1
+	`
+	_, err := s.db.ExecContext(ctx, query, who)
+	if err != nil {
+		return fmt.Errorf("failed clean orders_for_process: %w", err)
+	}
+	return nil
+}
+
+type Storager interface {
+	CreateUser(ctx context.Context, login, passwordHash string) (*models.UserID, error)
+	GetUser(ctx context.Context, login, passwordHash string) (*models.UserID, error)
+	CreateOrder(ctx context.Context, orderID string, userID models.UserID) error
+	GetUserOrders(ctx context.Context, userID models.UserID) (models.Orders, error)
+	Balance(ctx context.Context, userID models.UserID) (*models.Balance, error)
+	Withdraw(ctx context.Context, userID models.UserID, orderID string, sum float32) error
+	Withdrawals(ctx context.Context, userID models.UserID) (models.Withdrawals, error)
+	CleanupAfterCrash(ctx context.Context, t time.Duration) error
+	GetOrdersForProcess(ctx context.Context, who string, limit uint) (models.ProcessingOrders, error)
+	UpdateOrders(ctx context.Context, data []*models.AccrualOrderItem, who string) error
+	CleanOrdersForProcess(ctx context.Context, who string) error
+}
