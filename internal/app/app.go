@@ -40,7 +40,7 @@ type App struct {
 	store   storage.Storager
 	reqChan chan *models.ProcessingOrderItem
 	resChan chan *models.AccrualOrderItem
-	who     string
+	whoLock string
 }
 
 func NewApp(cnf *config.Config) (*App, error) {
@@ -54,10 +54,10 @@ func NewApp(cnf *config.Config) (*App, error) {
 		store:   s,
 		reqChan: make(chan *models.ProcessingOrderItem, ChanLimit),
 		resChan: make(chan *models.AccrualOrderItem, ChanLimit),
-		who:     generateWho(cnf.Port),
+		whoLock: generateWho(cnf.Port),
 	}
 	app.setRoute()
-	logger.Log.Debug("app create", zap.String("who", app.who))
+	logger.Log.Debug("app create", zap.String("who", app.whoLock))
 	return app, nil
 }
 
@@ -116,7 +116,7 @@ func (a *App) ProcessOrders(ctx context.Context) {
 	}
 
 	cleanup := func() {
-		err := a.store.CleanOrdersForProcess(context.Background(), a.who)
+		err := a.store.CleanOrdersForProcess(context.Background(), a.whoLock)
 		if err != nil {
 			logger.Log.Error("failed CleanOrdersForProcess", zap.Error(err))
 		}
@@ -130,7 +130,7 @@ func (a *App) ProcessOrders(ctx context.Context) {
 			return
 		case <-ticker.C:
 			cleanup()
-			data, err := a.store.GetOrdersForProcess(ctx, a.who, ChanLimit)
+			data, err := a.store.GetOrdersForProcess(ctx, a.whoLock, ChanLimit)
 			if err != nil {
 				logger.Log.Error("failed GetOrdersForProcess", zap.Error(err))
 				break
@@ -158,7 +158,7 @@ func (a *App) ProcessOrders(ctx context.Context) {
 						}
 					}
 				}
-				err := a.store.UpdateOrders(ctx, accrual, a.who)
+				err := a.store.UpdateOrders(ctx, accrual, a.whoLock)
 				if err != nil {
 					logger.Log.Error("failed UpdateOrders", zap.Error(err))
 				}
