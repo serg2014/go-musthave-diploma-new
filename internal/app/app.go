@@ -133,39 +133,45 @@ func (a *App) ProcessOrders(ctx context.Context) {
 			return
 		case <-ticker.C:
 			cleanup()
-			data, err := a.store.GetOrdersForProcess(ctx, a.whoLock, ChanLimit)
-			if err != nil {
-				logger.Log.Error("failed GetOrdersForProcess", zap.Error(err))
-				break
-			}
-			if len(data) != 0 {
-				for i := range data {
-					// send orderid and userid
-					a.reqChan <- &data[i]
-				}
+			a.processOrdersChunk(ctx)
+		}
+	}
+}
 
-				accrual := make([]*models.AccrualOrderItem, 0, len(data))
-				for range data {
-					select {
-					case <-ctx.Done():
-						return
-					case itemPtr := <-a.resChan:
-						if itemPtr.Error != nil {
-							logger.Log.Debug(
-								"failed get Accrual",
-								zap.Error(itemPtr.Error),
-								zap.String("orderID", itemPtr.OrderID),
-							)
-						} else {
-							accrual = append(accrual, itemPtr)
-						}
-					}
-				}
-				err := a.store.UpdateOrders(ctx, accrual, a.whoLock)
-				if err != nil {
-					logger.Log.Error("failed UpdateOrders", zap.Error(err))
-				}
+func (a *App) processOrdersChunk(ctx context.Context) {
+	data, err := a.store.GetOrdersForProcess(ctx, a.whoLock, ChanLimit)
+	if err != nil {
+		logger.Log.Error("failed GetOrdersForProcess", zap.Error(err))
+		return
+	}
+	if len(data) == 0 {
+		return
+	}
+
+	for i := range data {
+		// send orderid and userid
+		a.reqChan <- &data[i]
+	}
+
+	accrual := make([]*models.AccrualOrderItem, 0, len(data))
+	for range data {
+		select {
+		case <-ctx.Done():
+			return
+		case itemPtr := <-a.resChan:
+			if itemPtr.Error != nil {
+				logger.Log.Debug(
+					"failed get Accrual",
+					zap.Error(itemPtr.Error),
+					zap.String("orderID", itemPtr.OrderID),
+				)
+			} else {
+				accrual = append(accrual, itemPtr)
 			}
 		}
+	}
+	err = a.store.UpdateOrders(ctx, accrual, a.whoLock)
+	if err != nil {
+		logger.Log.Error("failed UpdateOrders", zap.Error(err))
 	}
 }
